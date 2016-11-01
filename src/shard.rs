@@ -399,7 +399,7 @@ pub struct ShardReader<T, S> {
 }
 
 impl<T, S> ShardReader<T, S> where S: Serializer<T> {
-    fn open<P: AsRef<Path>>(path: P, serializer: S) -> ShardReader<T, S> {
+    pub fn open<P: AsRef<Path>>(path: P, serializer: S) -> ShardReader<T, S> {
         let mut f = File::open(path).unwrap();
 
         let (num_shards, index_rows) = Self::read_index_block(&mut f);
