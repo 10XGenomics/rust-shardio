@@ -435,7 +435,7 @@ impl<T, S> ShardReader<T, S> where S: Serializer<T> {
         (num_shards, regs)
     }
 
-    pub fn read_shard(&self, shard: usize, data: &mut Vec<T>, buf: &mut Vec<u8>) {
+    pub fn read_shard_buf(&self, shard: usize, data: &mut Vec<T>, buf: &mut Vec<u8>) {
         match self.index.get(&shard) {
             Some(recs) => {
                 for rec in recs.iter() {
@@ -449,6 +449,15 @@ impl<T, S> ShardReader<T, S> where S: Serializer<T> {
             None => (),
         }
     }
+
+    pub fn read_shard(&self, shard: usize) -> Vec<T> {
+        let mut buf = Vec::new();
+        let mut data = Vec::new();
+
+        self.read_shard_buf(shard, &mut data, &mut buf);
+        data
+    }
+
 
     pub fn num_shards(&self) -> usize {
         *self.index.keys().max().unwrap_or(&0) + 1
@@ -476,7 +485,7 @@ impl<T, S> ShardReaderSet<T, S> where S: Serializer<T> {
     pub fn read_shard(&self, shard: usize, data: &mut Vec<T>) {
         let mut buf = Vec::new();
         for r in self.readers.iter() {
-            r.read_shard(shard, data, &mut buf)
+            r.read_shard_buf(shard, data, &mut buf)
         }
     }
 
@@ -601,11 +610,9 @@ mod shard_tests {
         let reader = ShardReader::open(tmp.path(), ser.clone());
 
         let mut all_items = Vec::new();
-        let mut buf = Vec::new();
 
         for i in 0..reader.num_shards() {
-            let mut items = Vec::new();
-            reader.read_shard(i, &mut items, &mut buf); 
+            let items = reader.read_shard(i); 
             all_items.extend(items);
         }
 
