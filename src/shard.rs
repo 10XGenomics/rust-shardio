@@ -116,7 +116,6 @@ pub trait Shardable {
 }
 
 struct ShardWriterThread<T, S> where T: Sync + Send + Shardable, S: Serializer<T> {
-    local_shards: usize,
     thread_id: usize,
     total_shards: usize,
     thread_bits: usize,
@@ -130,6 +129,7 @@ struct ShardWriterThread<T, S> where T: Sync + Send + Shardable, S: Serializer<T
 
 impl<T, S> ShardWriterThread<T, S> where T: 'static + Sync + Send + Shardable + , S: 'static + Serializer<T> {
     fn new(
+        buffer_size: usize,
         thread_id: usize,
         total_shards: usize,
         thread_bits: usize,
@@ -141,11 +141,10 @@ impl<T, S> ShardWriterThread<T, S> where T: 'static + Sync + Send + Shardable + 
 
         let mut item_buffers = Vec::new();
         for _ in 0 .. local_shards {
-            item_buffers.push(Vec::with_capacity(2048))
+            item_buffers.push(Vec::with_capacity(buffer_size))
         }
 
         ShardWriterThread {
-            local_shards: local_shards,
             thread_id: thread_id,
             total_shards: total_shards,
             thread_bits: thread_bits,
@@ -219,19 +218,16 @@ impl<T, S> ShardWriterThread<T, S> where T: 'static + Sync + Send + Shardable + 
 }
 
 
-pub struct ShardWriteManager<T: 'static + Sync + Send + Shardable, S: 'static + Serializer<T>> {
+pub struct ShardWriteManager<T: 'static + Sync + Send + Shardable> {
     total_shards: usize,
-    thread_bits: usize,
-    serializer: S,
-
     handles: Vec<JoinHandle<()>>,
     txs: Vec<SyncSender<Option<Vec<T>>>>,
     region_manager: Arc<FileRegionManager>,
     file: File,
 }
 
-impl<T, S: Serializer<T>> ShardWriteManager<T, S> where T: 'static + Sync + Send + Shardable, S: 'static + Serializer<T> {
-    pub fn new(path: &Path, num_shards: usize, thread_bits: usize, serializer: S) -> ShardWriteManager<T, S> {
+impl<T> ShardWriteManager<T> where T: 'static + Sync + Send + Shardable {
+    pub fn new<S: 'static + Serializer<T>>(path: &Path, per_shard_buffer_size: usize, num_shards: usize, thread_bits: usize, serializer: S) -> ShardWriteManager<T> {
         let mut txs = Vec::new();
         let mut handles = Vec::new();
 
@@ -253,6 +249,7 @@ impl<T, S: Serializer<T>> ShardWriteManager<T, S> where T: 'static + Sync + Send
             };
 
             let mut thread = ShardWriterThread::new(
+                per_shard_buffer_size,
                 thread_id,
                 num_shards,
                 thread_bits,
@@ -266,8 +263,6 @@ impl<T, S: Serializer<T>> ShardWriteManager<T, S> where T: 'static + Sync + Send
 
         ShardWriteManager {
             total_shards: num_shards,
-            thread_bits: thread_bits,
-            serializer: serializer,
             region_manager: arc_regions,
             handles: handles,
             txs: txs,
@@ -281,7 +276,8 @@ impl<T, S: Serializer<T>> ShardWriteManager<T, S> where T: 'static + Sync + Send
 
     pub fn get_sender(&self) -> ShardSender<T>
     {
-        ShardSender::new(&self)
+        let sender: ShardSender<T> = ShardSender::new(&self);
+        sender
     }
 
     /// Write out the shard positioning data
@@ -319,7 +315,7 @@ impl<T, S: Serializer<T>> ShardWriteManager<T, S> where T: 'static + Sync + Send
 }
 
 
-impl<T, S: Serializer<T>> Drop for ShardWriteManager<T,S>  where T: 'static + Sync + Send + Shardable, S: 'static + Serializer<T>
+impl<T> Drop for ShardWriteManager<T>  where T: 'static + Sync + Send + Shardable
 {
     fn drop(&mut self) {
         self.finish();
@@ -336,7 +332,7 @@ pub struct ShardSender<T: Sync + Send + Shardable> {
 }
 
 impl<T: Sync + Send + Shardable> ShardSender<T> {
-    fn new<S: Serializer<T>>(manager: &ShardWriteManager<T,S>) -> ShardSender<T> {
+    fn new(manager: &ShardWriteManager<T>) -> ShardSender<T> {
         let mut new_txs = Vec::new();
         for t in manager.txs.iter() {
             new_txs.push(t.clone())
@@ -391,11 +387,9 @@ impl<T: Sync + Send + Shardable> Drop for ShardSender<T> {
 pub struct ShardReader<T, S> {
     serializer: S,
     file: File,
-    raw_index: Vec<ShardRecord>,
     num_shards: usize,
     index: HashMap<usize, Vec<ShardRecord>>,
     phantom: PhantomData<T>,
-    buf: Vec<u8>,
 }
 
 impl<T, S> ShardReader<T, S> where S: Serializer<T> {
@@ -404,7 +398,6 @@ impl<T, S> ShardReader<T, S> where S: Serializer<T> {
 
         let (num_shards, index_rows) = Self::read_index_block(&mut f);
         let mut index: HashMap<usize, Vec<ShardRecord>> = HashMap::new();
-        let raw_index = index_rows.clone();
 
         for rec in index_rows {
             let shard_recs = index.entry(rec.shard).or_insert_with(|| Vec::new());
@@ -413,12 +406,10 @@ impl<T, S> ShardReader<T, S> where S: Serializer<T> {
 
         ShardReader {
             serializer: serializer,
-            raw_index: raw_index,
             file: f,
             num_shards: num_shards,
             index: index,
             phantom: PhantomData,
-            buf: Vec::new(),
         }
     }
 
@@ -538,23 +529,23 @@ mod shard_tests {
 
         let ns = 16;
         // Test different numbers of threads
-        check_round_trip(ns, 0, 1<<4);
-        check_round_trip(ns, 0, 1<<8);
-        check_round_trip(ns, 0, 1<<12);
-        check_round_trip(ns, 0, 1<<16);
+        check_round_trip(1024, ns, 0, 1<<4);
+        check_round_trip(4096, ns, 0, 1<<8);
+        check_round_trip(128, ns, 0, 1<<12);
+        check_round_trip(50, ns, 0, 1<<16);
 
 
         // Test different numbers of threads
-        check_round_trip(1024, 0, 2<<16);
-        check_round_trip(1024, 1, 2<<16);
-        check_round_trip(1024, 2, 2<<16);
-        check_round_trip(1024, 3, 2<<16);
+        check_round_trip(100, 1024, 0, 2<<16);
+        check_round_trip(200, 1024, 1, 2<<16);
+        check_round_trip(400, 1024, 2, 2<<16);
+        check_round_trip(800, 1024, 3, 2<<16);
 
         // Test different numbers of shards
-        check_round_trip(1 << 4, 2, 2<<16);
-        check_round_trip(1 << 8, 2, 2<<16);
-        check_round_trip(1 << 12, 2, 2<<16);
-        check_round_trip(1 << 16, 2, 2<<16);
+        check_round_trip(1000, 1 << 4, 2, 2<<16);
+        check_round_trip(2000, 1 << 8, 2, 2<<16);
+        check_round_trip(20, 1 << 12, 2, 2<<16);
+        check_round_trip(100, 1 << 16, 2, 2<<16);
     }
 
 
@@ -562,20 +553,20 @@ mod shard_tests {
     fn test_shard_round_trip_big() {
 
         // Test different numbers of threads
-        check_round_trip(8192, 4, 2<<16);
-        check_round_trip(1024, 1, 2<<16);
-        check_round_trip(1024, 2, 2<<16);
-        check_round_trip(1024, 3, 2<<16);
+        check_round_trip(1024, 8192, 4, 2<<16);
+        check_round_trip(2048, 1024, 1, 2<<16);
+        check_round_trip(4096, 1024, 2, 2<<16);
+        check_round_trip(8192, 1024, 3, 2<<16);
 
         // Test different numbers of shards
-        check_round_trip(1 << 4, 2, 2<<16);
-        check_round_trip(1 << 8, 2, 2<<16);
-        check_round_trip(1 << 12, 2, 2<<16);
-        check_round_trip(1 << 16, 2, 2<<16);
+        check_round_trip(8192, 1 << 4, 2, 2<<16);
+        check_round_trip(4096, 1 << 8, 2, 2<<16);
+        check_round_trip(2048, 1 << 12, 2, 2<<16);
+        check_round_trip(1024, 1 << 16, 2, 2<<16);
     }
 
 
-    fn check_round_trip(n_shards: usize, thread_bits: usize, n_items: usize) {
+    fn check_round_trip(shard_buf_size: usize, n_shards: usize, thread_bits: usize, n_items: usize) {
         
         println!("test round trip: n_shards: {}, thread_bits: {}, n_items: {}", n_shards, thread_bits, n_items);
 
@@ -585,7 +576,7 @@ mod shard_tests {
 
         // Write and close file
         let true_items = {
-            let manager = ShardWriteManager::new(tmp.path(), n_shards, thread_bits, ser.clone());
+            let manager = ShardWriteManager::new(tmp.path(), shard_buf_size, n_shards, thread_bits, ser.clone());
             let mut true_items = Vec::new();
 
             // Sender must be closed
