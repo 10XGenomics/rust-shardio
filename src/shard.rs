@@ -449,6 +449,14 @@ impl<T, S> ShardReader<T, S> where S: Serializer<T> {
         data
     }
 
+    pub fn shard_len(&self, shard: usize) -> usize {
+        match self.index.get(&shard) {
+            Some(shard_idx) => {
+                shard_idx.iter().map(|x| x.n_items).sum()
+            }, 
+            None => 0,
+        }
+    }
 
     pub fn num_shards(&self) -> usize {
         *self.index.keys().max().unwrap_or(&0) + 1
@@ -482,6 +490,10 @@ impl<T, S> ShardReaderSet<T, S> where S: Serializer<T> {
 
     pub fn num_shards(&self) -> usize {
         self.readers[0].num_shards
+    }
+
+    pub fn shard_len(&self, shard: usize) -> usize {
+        self.readers.iter().map(|r| r.shard_len(shard)).sum()
     }
 }
 
@@ -603,7 +615,8 @@ mod shard_tests {
         let mut all_items = Vec::new();
 
         for i in 0..reader.num_shards() {
-            let items = reader.read_shard(i); 
+            let items = reader.read_shard(i);
+            assert_eq!(reader.shard_len(i), items.len());
             all_items.extend(items);
         }
 
