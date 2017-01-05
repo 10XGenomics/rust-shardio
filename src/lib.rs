@@ -30,13 +30,15 @@ pub mod shard;
 
 
 pub struct ThreadProxyWriter<T: Send + Write> {
+    buf_size: usize,
+    buf: Vec<u8>,
     thread_handle: Option<JoinHandle<Result<usize, RecvError>>>,
     tx: SyncSender<Option<Vec<u8>>>,
     phantom: PhantomData<T>,
 }
 
 impl<T: 'static + Send + Write> ThreadProxyWriter<T> {
-    pub fn new(mut writer: T) -> ThreadProxyWriter<T> {
+    pub fn new(mut writer: T, buffer_size: usize) -> ThreadProxyWriter<T> {
         let (tx, rx) = sync_channel::<Option<Vec<u8>>>(10);
 
         let handle = thread::spawn(move || {
@@ -56,6 +58,8 @@ impl<T: 'static + Send + Write> ThreadProxyWriter<T> {
         });
 
         ThreadProxyWriter {
+            buf_size: buffer_size,
+            buf: Vec::with_capacity(buffer_size),
             thread_handle: Some(handle),
             tx: tx,
             phantom: PhantomData,
@@ -65,19 +69,25 @@ impl<T: 'static + Send + Write> ThreadProxyWriter<T> {
 
 impl<T: Send + Write> Write for ThreadProxyWriter<T> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let vec = Vec::from(buf);
-        self.tx.send(Some(vec));
+        if buf.len() + self.buf.len() > self.buf.capacity() {
+            let old_buf = std::mem::replace(&mut self.buf, Vec::with_capacity(self.buf_size));
+            self.tx.send(Some(old_buf));
+        }
+
+        self.buf.extend_from_slice(buf);
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.tx.send(Some(vec![]));
+        let old_buf = std::mem::replace(&mut self.buf, Vec::with_capacity(self.buf_size));
+        self.tx.send(Some(old_buf));
         Ok(())
     }
 }
 
 impl<T: Send + Write> Drop for ThreadProxyWriter<T> {
     fn drop(&mut self) {
+        self.flush();
         self.tx.send(None);
         self.thread_handle.take().map(|th| th.join());
     }
@@ -406,7 +416,7 @@ mod pod_tests {
             let mut w1 = File::create(tmp1.path()).unwrap();
 
             let mut w2 = File::create(tmp2.path()).unwrap();
-            let mut p2 = super::ThreadProxyWriter::new(w2);
+            let mut p2 = super::ThreadProxyWriter::new(w2, 4096);
 
             for i in 0 .. 1000000 {
                 let cc = format!("a: {}, b: {}\n", i, i+1);
