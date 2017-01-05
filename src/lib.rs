@@ -12,7 +12,7 @@ use std::fs::File;
 use std::io::{Write, BufWriter, BufReader, Read};
 use std::collections::HashMap;
 use std::sync::mpsc::sync_channel;
-use std::sync::mpsc::{SyncSender, Receiver};
+use std::sync::mpsc::{SyncSender, Receiver, RecvError};
 use std::path::{Path, PathBuf};
 
 use std::thread;
@@ -27,6 +27,63 @@ use std::io;
 use std::marker::PhantomData;
 
 pub mod shard;
+
+
+pub struct ThreadProxyWriter<T: Send + Write> {
+    thread_handle: Option<JoinHandle<Result<usize, RecvError>>>,
+    tx: SyncSender<Option<Vec<u8>>>,
+    phantom: PhantomData<T>,
+}
+
+impl<T: 'static + Send + Write> ThreadProxyWriter<T> {
+    pub fn new(mut writer: T) -> ThreadProxyWriter<T> {
+        let (tx, rx) = sync_channel::<Option<Vec<u8>>>(10);
+
+        let handle = thread::spawn(move || {
+            let mut total = 0;
+            loop {
+                match rx.recv() {
+                    Ok(Some(data)) => {
+                        writer.write(data.as_slice());
+                        total += data.len();
+                    },
+                    Ok(None) => break,
+                    Err(e) => return Err(e),
+                }
+            }
+
+            Ok(total)
+        });
+
+        ThreadProxyWriter {
+            thread_handle: Some(handle),
+            tx: tx,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: Send + Write> Write for ThreadProxyWriter<T> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let vec = Vec::from(buf);
+        self.tx.send(Some(vec));
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.tx.send(Some(vec![]));
+        Ok(())
+    }
+}
+
+impl<T: Send + Write> Drop for ThreadProxyWriter<T> {
+    fn drop(&mut self) {
+        self.tx.send(None);
+        self.thread_handle.take().map(|th| th.join());
+    }
+}
+
+
 
 
 pub struct PodWriter {
@@ -326,7 +383,8 @@ impl<'a, T: Copy + Send> Drop for ShardProducer<T> {
 #[cfg(test)]
 mod pod_tests {
     use std::path::Path;
-    use std::fs::remove_dir_all;
+    use std::io::{Read, Write};
+    use std::fs::{File, remove_dir_all};
     use tempfile;
 
     #[derive(Copy, Clone, Eq, PartialEq)]
@@ -336,6 +394,38 @@ mod pod_tests {
         c: u16,
         d: u8,
     }
+
+
+    #[test]
+    fn thread_write_test() {
+
+        let tmp1 = tempfile::NamedTempFile::new().unwrap();
+        let tmp2 = tempfile::NamedTempFile::new().unwrap();
+
+        {
+            let mut w1 = File::create(tmp1.path()).unwrap();
+
+            let mut w2 = File::create(tmp2.path()).unwrap();
+            let mut p2 = super::ThreadProxyWriter::new(w2);
+
+            for i in 0 .. 1000000 {
+                let cc = format!("a: {}, b: {}\n", i, i+1);
+                w1.write(cc.as_bytes());
+                p2.write(cc.as_bytes());            
+            }
+        }
+
+        let mut f1 = File::open(tmp1.path()).unwrap();
+        let mut v1 = Vec::new();
+        f1.read_to_end(&mut v1);
+
+        let mut f2 = File::open(tmp2.path()).unwrap();
+        let mut v2 = Vec::new();
+        f2.read_to_end(&mut v2);
+
+        assert_eq!(v1, v2);
+    }
+
 
     #[test]
     fn pod_round_trip() {
