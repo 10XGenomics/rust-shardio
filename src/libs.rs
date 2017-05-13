@@ -1,3 +1,17 @@
+//! Efficiently write Rust structs to shard files from multiple threads.
+
+#[macro_use]
+extern crate serde_derive;
+
+extern crate byteorder;
+extern crate libc;
+extern crate bincode;
+extern crate serde;
+extern crate lz4;
+
+#[cfg(test)]
+extern crate tempfile;
+
 use std::fs::File;
 use std::io::{Result, Error, Seek, SeekFrom};
 use std::os::unix::io::{RawFd, AsRawFd};
@@ -22,6 +36,8 @@ use bincode::{serialize_into, deserialize_from};
 use byteorder::{BigEndian, WriteBytesExt, ReadBytesExt};
 
 use libc::{pread, pwrite, c_void, off_t, size_t, ssize_t};
+
+pub mod helpers;
 
 fn err(e: ssize_t) -> Result<usize> {
     if e == -1 as ssize_t {

@@ -1,17 +1,3 @@
-//! Efficiently write Rust structs to shard files from multiple threads.
-
-#[macro_use]
-extern crate serde_derive;
-
-extern crate byteorder;
-extern crate libc;
-extern crate bincode;
-extern crate serde;
-extern crate lz4;
-
-#[cfg(test)]
-extern crate tempfile;
-
 use std::fs::File;
 use std::io::{Write, BufWriter, BufReader, Read};
 use std::collections::HashMap;
@@ -30,9 +16,7 @@ use std::io;
 
 use std::marker::PhantomData;
 
-pub mod shard;
 
-/// 
 pub struct ThreadProxyIterator<T: Send> {
     rx: Receiver<Option<T>>,
     done: bool
