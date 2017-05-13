@@ -4,10 +4,12 @@ version = "0.1.0"
 authors = ["Patrick Marks <patrick@10xgenomics.com>"]
 
 [dependencies]
-rustc-serialize = "*"
+serde = "*"
+serde_derive = "*"
+bincode = "0.8.0"
 byteorder = "*"
 libc = "*"
-bincode = "*"
+lz4 = "*"
 
 [dev-dependencies]
 tempfile = "*"
