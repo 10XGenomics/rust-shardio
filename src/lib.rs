@@ -25,9 +25,7 @@ use std::path::{Path};
 use std::thread;
 use std::thread::JoinHandle;
 use std::marker::PhantomData;
-use lz4;
 
-use serde;
 use serde::ser::Serialize;
 use serde::de::Deserialize;
 
@@ -37,7 +35,7 @@ use byteorder::{BigEndian, WriteBytesExt, ReadBytesExt};
 
 use libc::{pread, pwrite, c_void, off_t, size_t, ssize_t};
 
-pub mod helpers;
+pub mod helper;
 
 fn err(e: ssize_t) -> Result<usize> {
     if e == -1 as ssize_t {
@@ -63,15 +61,16 @@ fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> Result<usize> {
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-struct  ShardRecord {
+/// A group of `n_items` items, from shard `shard`, sorted at position `offset`, using `block_size` bytes on-disk.
+struct ShardRecord {
     offset: usize,
     shard: usize,
     block_size: usize,
     n_items: usize
 }
 
-
-pub struct FileRegionState {
+/// Log of shard chunks written into this file.
+struct FileRegionState {
     // Current start position of next chunk
     cursor: usize,
 
@@ -79,7 +78,8 @@ pub struct FileRegionState {
     regions: Vec<ShardRecord>,
 }
 
-pub struct FileRegionManager {
+/// Mediate access to the shard file from multiple threads
+struct FileRegionManager {
     state: Mutex<FileRegionState>
 }
 
@@ -113,6 +113,7 @@ impl FileRegionManager {
     }
 }
 
+/// Write data in the file
 struct FileChunkWriter {
     file: RawFd,
     region_manager: Arc<FileRegionManager>
@@ -125,11 +126,12 @@ impl FileChunkWriter {
     }
 }
 
-
+/// Specify how to compute a shard id for a value of type T
 pub trait ShardDef<T>: 'static + Send {
     fn get_shard(t: &T) -> usize;
 }
 
+/// Manage the buffering and writing of items for a subset of the shard space.
 struct ShardWriterThread<T, S> where T: Sync + Send + Serialize, S: ShardDef<T> {
     thread_id: usize,
     total_shards: usize,
@@ -239,7 +241,9 @@ impl<T, S> ShardWriterThread<T, S> where T: Sync + Send + serde::ser::Serialize,
     }
 }
 
-
+/// Write a stream of `T` data items to a file. ShardDef<T> defines a sharding function on T.
+/// Items are written in blocks where each block has items with a common value of ShardDef<T>::get_shard(item) % num_shards
+/// The block structure allows all the items from a shard to be read efficiently.
 pub struct ShardWriteManager<T: 'static + Sync + Send + Serialize, S: ShardDef<T>> {
     total_shards: usize,
     handles: Vec<JoinHandle<()>>,
@@ -250,6 +254,9 @@ pub struct ShardWriteManager<T: 'static + Sync + Send + Serialize, S: ShardDef<T
 }
 
 impl<T, S> ShardWriteManager<T, S> where T: 'static + Sync + Send + Serialize, S: ShardDef<T> {
+    /// Setup a shard file writer to `path`. Data will be distributed into `num_shards` shards. Each shard will buffer
+    /// up to `per_shard_buffer_size` items before writing a block. 2^`thread_bits` threads will be used to distribute the serialization
+    /// and IO in paralle.
     pub fn new(path: &Path, per_shard_buffer_size: usize, num_shards: usize, thread_bits: usize) -> ShardWriteManager<T, S> {
         let mut txs = Vec::new();
         let mut handles = Vec::new();
@@ -297,6 +304,7 @@ impl<T, S> ShardWriteManager<T, S> where T: 'static + Sync + Send + Serialize, S
         self.txs.len()
     }
 
+    /// Get a `ShardSender`. It can be sent to another thread that is generating data.
     pub fn get_sender(&self) -> ShardSender<T, S>
     {
         ShardSender::new(&self)
@@ -345,7 +353,7 @@ impl<T, S> Drop for ShardWriteManager<T, S>  where T: Sync + Send + Serialize, S
 }
 
 
-
+/// A handle that is used to send data to the shard file.
 pub struct ShardSender<T: Sync + Send + Serialize, S: ShardDef<T>> {
     tx_channels: Vec<SyncSender<Option<Vec<T>>>>,
     buffers: Vec<Vec<T>>,
@@ -377,6 +385,7 @@ impl<T: Sync + Send + Serialize, S: ShardDef<T>> ShardSender<T, S> {
         }
     }
 
+    /// Send an item to the shard file
     pub fn send(&mut self, item: T) {
         let shard_idx = S::get_shard(&item) % self.thread_shards;
         let send = {
@@ -394,6 +403,8 @@ impl<T: Sync + Send + Serialize, S: ShardDef<T>> ShardSender<T, S> {
         }
     }
 
+    /// Signal that you've finished sending items to this `ShardSender`. Also called 
+    /// if the `ShardSender` is dropped.
     pub fn finished(&mut self) {
         for (idx, buf) in self.buffers.drain(..).enumerate() {
             let out_ch = self.tx_channels.get(idx).unwrap();
@@ -408,6 +419,7 @@ impl<T: Sync + Send + Serialize, S:ShardDef<T>> Drop for ShardSender<T, S> {
     }
 }
 
+/// Read from a shard file.
 pub struct ShardReader<'a, T> where T: 'a + Deserialize<'a> {
     file: File,
     num_shards: usize,
@@ -416,6 +428,7 @@ pub struct ShardReader<'a, T> where T: 'a + Deserialize<'a> {
 }
 
 impl<'a, T> ShardReader<'a, T> where for<'de> T: Deserialize<'de> {
+    /// Open a shard file that stores `T` items.
     pub fn open<P: AsRef<Path>>(path: P) -> ShardReader<'a, T> {
         let mut f = File::open(path).unwrap();
 
@@ -466,6 +479,7 @@ impl<'a, T> ShardReader<'a, T> where for<'de> T: Deserialize<'de> {
         }
     }
 
+    /// Read the data in shard `shard`
     pub fn read_shard(&self, shard: usize) -> Vec<T> {
         let mut buf = Vec::new();
         let mut data = Vec::new();
@@ -474,6 +488,7 @@ impl<'a, T> ShardReader<'a, T> where for<'de> T: Deserialize<'de> {
         data
     }
 
+    /// Number of items in shard `shard`
     pub fn shard_len(&self, shard: usize) -> usize {
         match self.index.get(&shard) {
             Some(shard_idx) => {
@@ -483,16 +498,19 @@ impl<'a, T> ShardReader<'a, T> where for<'de> T: Deserialize<'de> {
         }
     }
 
+    /// Number of shards in file
     pub fn num_shards(&self) -> usize {
         *self.index.keys().max().unwrap_or(&0) + 1
     }
 }
 
+/// Reader that aggregates a collection of parallel shard files
 pub struct ShardReaderSet<'a, T> where T: 'a, for<'de> T: serde::Deserialize<'de> {
     readers: Vec<ShardReader<'a, T>>
 }
 
 impl<'a, T> ShardReaderSet<'a, T> where T: 'a ,for<'de> T: serde::Deserialize<'de> {
+    /// Open a set of shard files into a aggregated reader
     pub fn open<P: AsRef<Path>>(shard_files: &Vec<P>) -> ShardReaderSet<'a, T> {
         let mut readers = Vec::new();
 
@@ -506,6 +524,7 @@ impl<'a, T> ShardReaderSet<'a, T> where T: 'a ,for<'de> T: serde::Deserialize<'d
         }
     }
 
+    /// Read data for shard `shard` into `data` buffer
     pub fn read_shard(&self, shard: usize, data: &mut Vec<T>) {
         let mut buf = Vec::new();
         for r in self.readers.iter() {
@@ -513,10 +532,12 @@ impl<'a, T> ShardReaderSet<'a, T> where T: 'a ,for<'de> T: serde::Deserialize<'d
         }
     }
 
+    /// Number of shards
     pub fn num_shards(&self) -> usize {
         self.readers[0].num_shards
     }
 
+    /// Number of items in shard `shard`
     pub fn shard_len(&self, shard: usize) -> usize {
         self.readers.iter().map(|r| r.shard_len(shard)).sum()
     }

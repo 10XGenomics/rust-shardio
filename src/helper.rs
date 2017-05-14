@@ -1,16 +1,12 @@
-use std::fs::File;
-use std::io::{Write, BufWriter, BufReader, Read};
-use std::collections::HashMap;
+use std;
+use std::io::Write;
 use std::sync::mpsc::sync_channel;
 use std::sync::mpsc::{SyncSender, Receiver, RecvError};
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 
 use std::thread;
 use std::thread::JoinHandle;
-use std::slice;
-use std::mem;
 
-use std::fs::create_dir;
 use std::fs::{self, DirEntry};
 use std::io;
 
