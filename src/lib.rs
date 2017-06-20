@@ -7,10 +7,18 @@ extern crate byteorder;
 extern crate libc;
 extern crate bincode;
 extern crate serde;
+
+extern crate flate2;
+
+#[cfg(feature = "lz4")]
 extern crate lz4;
 
 #[cfg(test)]
 extern crate tempfile;
+
+use flate2::Compression;
+use flate2::write::ZlibEncoder;
+use flate2::read::ZlibDecoder;
 
 use std::fs::File;
 use std::io::{Result, Error, Seek, SeekFrom};
@@ -212,6 +220,18 @@ impl<T, S> ShardWriterThread<T, S> where T: Sync + Send + serde::ser::Serialize,
         }
     }
 
+    #[cfg(feature = "lz4")]
+    fn get_encoder(buffer: &mut Vec<u8>) -> lz4::Encoder<&mut Vec<u8>>
+    {
+        lz4::EncoderBuilder::new().build(buffer).unwrap()
+    }
+
+    #[cfg(not(feature = "lz4"))]
+    fn get_encoder(buffer: &mut Vec<u8>) -> flate2::write::ZlibEncoder<&mut Vec<u8>>
+    {
+        ZlibEncoder::new(buffer, Compression::Fast)
+    }
+
     fn write_item_buffer(&mut self, local_shard: usize)
     {
         let main_shard = local_shard << self.thread_bits | (self.thread_id as usize);
@@ -220,7 +240,7 @@ impl<T, S> ShardWriterThread<T, S> where T: Sync + Send + serde::ser::Serialize,
         self.write_buffer.clear();
 
         {
-            let mut encoder = lz4::EncoderBuilder::new().build(&mut self.write_buffer).unwrap();
+            let mut encoder = Self::get_encoder(&mut self.write_buffer);
             serialize_into(&mut encoder, items, Infinite).unwrap();
             encoder.finish();
         }
@@ -461,6 +481,20 @@ impl<'a, T> ShardReader<'a, T> where for<'de> T: Deserialize<'de> {
         (num_shards, regs)
     }
 
+
+    #[cfg(feature = "lz4")]
+    fn get_decoder(buffer: &mut Vec<u8>) -> lz4::Decoder<&[u8]>
+    {
+        lz4::Decoder::new(buffer.as_slice()).unwrap()
+    }
+
+    #[cfg(not(feature = "lz4"))]
+    fn get_decoder(buffer: &mut Vec<u8>) -> flate2::read::ZlibDecoder<&[u8]>
+    {
+        ZlibDecoder::new(buffer.as_slice())
+    }
+
+
     pub fn read_shard_buf(&self, shard: usize, data: &mut Vec<T>, buf: &mut Vec<u8>) {
         match self.index.get(&shard) {
             Some(recs) => {
@@ -469,7 +503,7 @@ impl<'a, T> ShardReader<'a, T> where for<'de> T: Deserialize<'de> {
                     let read_len = read_at(&self.file.as_raw_fd(), rec.offset as u64, buf.as_mut_slice()).unwrap();
                     assert_eq!(read_len, rec.block_size);
                     
-                    let mut decoder = lz4::Decoder::new(buf.as_slice()).unwrap();
+                    let mut decoder = Self::get_decoder(buf);
                     let r: Vec<T> = deserialize_from(&mut decoder, Infinite).unwrap();
                     data.extend(r);
                 }

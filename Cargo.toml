@@ -3,13 +3,18 @@ name = "shardio"
 version = "0.1.0"
 authors = ["Patrick Marks <patrick@10xgenomics.com>"]
 
+[features]
+default = []
+
 [dependencies]
 serde = "*"
 serde_derive = "*"
 bincode = "0.8.0"
 byteorder = "*"
 libc = "*"
-lz4 = "*"
+flate2 = "*"
+lz4 = { version = "*", optional = true }
 
 [dev-dependencies]
 tempfile = "*"
+
