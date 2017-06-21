@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Patrick Marks <patrick@10xgenomics.com>"]
 
 [features]
-default = []
+default = ['lz4']
 
 [dependencies]
 serde = "*"
