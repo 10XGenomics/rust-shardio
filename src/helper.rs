@@ -2,14 +2,9 @@ use std;
 use std::io::Write;
 use std::sync::mpsc::sync_channel;
 use std::sync::mpsc::{SyncSender, Receiver, RecvError};
-use std::path::{Path};
-
 use std::thread;
 use std::thread::JoinHandle;
-
-use std::fs::{self, DirEntry};
 use std::io;
-
 use std::marker::PhantomData;
 
 
@@ -40,7 +35,7 @@ impl<T: Send> Iterator for ThreadProxyIterator<T> {
 impl<T: 'static + Send> ThreadProxyIterator<T> {
     pub fn new<I: 'static + Send + Iterator<Item=T>>(itr: I, buf: usize) -> ThreadProxyIterator<T> {
         let (tx, rx) = sync_channel::<Option<T>>(buf);
-        let handle = thread::spawn(move || {
+        let _ = thread::spawn(move || {
             for item in itr {
                 match tx.send(Some(item)) {
                     Err(_) => return,
@@ -77,7 +72,7 @@ impl<T: 'static + Send + Write> ThreadProxyWriter<T> {
             loop {
                 match rx.recv() {
                     Ok(Some(data)) => {
-                        writer.write(data.as_slice());
+                        let _ = writer.write(data.as_slice());
                         total += data.len();
                     },
                     Ok(None) => break,
@@ -102,7 +97,7 @@ impl<T: Send + Write> Write for ThreadProxyWriter<T> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if buf.len() + self.buf.len() > self.buf.capacity() {
             let old_buf = std::mem::replace(&mut self.buf, Vec::with_capacity(self.buf_size));
-            self.tx.send(Some(old_buf));
+            let _ = self.tx.send(Some(old_buf));
         }
 
         self.buf.extend_from_slice(buf);
@@ -111,42 +106,23 @@ impl<T: Send + Write> Write for ThreadProxyWriter<T> {
 
     fn flush(&mut self) -> io::Result<()> {
         let old_buf = std::mem::replace(&mut self.buf, Vec::with_capacity(self.buf_size));
-        self.tx.send(Some(old_buf));
+        let _  = self.tx.send(Some(old_buf));
         Ok(())
     }
 }
 
 impl<T: Send + Write> Drop for ThreadProxyWriter<T> {
     fn drop(&mut self) {
-        self.flush();
-        self.tx.send(None);
+        let _ = self.flush();
+        let _ = self.tx.send(None);
         self.thread_handle.take().map(|th| th.join());
     }
 }
 
-
-
-// one possible implementation of fs::walk_dir only visiting files
-fn visit_dirs(dir: &Path, cb: &Fn(&DirEntry)) -> io::Result<()> {
-    if try!(fs::metadata(dir)).is_dir() {
-        for entry in try!(fs::read_dir(dir)) {
-            let entry = try!(entry);
-            if try!(fs::metadata(entry.path())).is_dir() {
-                try!(visit_dirs(&entry.path(), cb));
-            } else {
-                cb(&entry);
-            }
-        }
-    }
-    Ok(())
-}
-
-
 #[cfg(test)]
 mod pod_tests {
-    use std::path::Path;
     use std::io::{Read, Write};
-    use std::fs::{File, remove_dir_all};
+    use std::fs::{File};
     use tempfile;
 
     #[derive(Copy, Clone, Eq, PartialEq)]
@@ -181,23 +157,23 @@ mod pod_tests {
         {
             let mut w1 = File::create(tmp1.path()).unwrap();
 
-            let mut w2 = File::create(tmp2.path()).unwrap();
+            let w2 = File::create(tmp2.path()).unwrap();
             let mut p2 = super::ThreadProxyWriter::new(w2, 4096);
 
             for i in 0 .. 1000000 {
                 let cc = format!("a: {}, b: {}\n", i, i+1);
-                w1.write(cc.as_bytes());
-                p2.write(cc.as_bytes());            
+                let _ = w1.write(cc.as_bytes());
+                let _ = p2.write(cc.as_bytes());            
             }
         }
 
         let mut f1 = File::open(tmp1.path()).unwrap();
         let mut v1 = Vec::new();
-        f1.read_to_end(&mut v1);
+        let _ = f1.read_to_end(&mut v1);
 
         let mut f2 = File::open(tmp2.path()).unwrap();
         let mut v2 = Vec::new();
-        f2.read_to_end(&mut v2);
+        let _ = f2.read_to_end(&mut v2);
 
         assert_eq!(v1, v2);
     }

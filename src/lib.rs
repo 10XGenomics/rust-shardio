@@ -16,10 +16,6 @@ extern crate lz4;
 #[cfg(test)]
 extern crate tempfile;
 
-use flate2::Compression;
-use flate2::write::ZlibEncoder;
-use flate2::read::ZlibDecoder;
-
 use std::fs::File;
 use std::io::{Result, Error, Seek, SeekFrom};
 use std::os::unix::io::{RawFd, AsRawFd};
@@ -229,6 +225,8 @@ impl<T, S> ShardWriterThread<T, S> where T: Sync + Send + serde::ser::Serialize,
     #[cfg(not(feature = "lz4"))]
     fn get_encoder(buffer: &mut Vec<u8>) -> flate2::write::ZlibEncoder<&mut Vec<u8>>
     {
+        use flate2::Compression;
+        use flate2::write::ZlibEncoder;
         ZlibEncoder::new(buffer, Compression::Fast)
     }
 
@@ -491,6 +489,8 @@ impl<'a, T> ShardReader<'a, T> where for<'de> T: Deserialize<'de> {
     #[cfg(not(feature = "lz4"))]
     fn get_decoder(buffer: &mut Vec<u8>) -> flate2::read::ZlibDecoder<&[u8]>
     {
+        use flate2::Compression;
+        use flate2::write::ZlibEncoder;
         ZlibDecoder::new(buffer.as_slice())
     }
 
