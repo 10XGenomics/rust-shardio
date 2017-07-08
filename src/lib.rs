@@ -136,7 +136,7 @@ pub trait ShardDef<T>: 'static + Send {
 }
 
 /// Manage the buffering and writing of items for a subset of the shard space.
-struct ShardWriterThread<T, S> where T: Sync + Send + Serialize, S: ShardDef<T> {
+struct ShardWriterThread<T, S> where T: Send + Serialize, S: ShardDef<T> {
     thread_id: usize,
     total_shards: usize,
     thread_bits: usize,
@@ -149,7 +149,7 @@ struct ShardWriterThread<T, S> where T: Sync + Send + Serialize, S: ShardDef<T> 
     phantom: PhantomData<S>,
 }
 
-impl<T, S> ShardWriterThread<T, S> where T: Sync + Send + serde::ser::Serialize, S: ShardDef<T>{
+impl<T, S> ShardWriterThread<T, S> where T: Send + serde::ser::Serialize, S: ShardDef<T>{
     fn new(
         buffer_size: usize,
         thread_id: usize,
@@ -262,7 +262,8 @@ impl<T, S> ShardWriterThread<T, S> where T: Sync + Send + serde::ser::Serialize,
 /// Write a stream of `T` data items to a file. ShardDef<T> defines a sharding function on T.
 /// Items are written in blocks where each block has items with a common value of ShardDef<T>::get_shard(item) % num_shards
 /// The block structure allows all the items from a shard to be read efficiently.
-pub struct ShardWriteManager<T: 'static + Sync + Send + Serialize, S: ShardDef<T>> {
+pub struct ShardWriteManager<T: 'static + Send + Serialize, S: ShardDef<T>> {
+    sender_buffer_size: usize,
     total_shards: usize,
     handles: Vec<JoinHandle<()>>,
     txs: Vec<SyncSender<Option<Vec<T>>>>,
@@ -271,7 +272,7 @@ pub struct ShardWriteManager<T: 'static + Sync + Send + Serialize, S: ShardDef<T
     phantom: PhantomData<S>,
 }
 
-impl<T, S> ShardWriteManager<T, S> where T: 'static + Sync + Send + Serialize, S: ShardDef<T> {
+impl<T, S> ShardWriteManager<T, S> where T: 'static + Send + Serialize, S: ShardDef<T> {
     /// Setup a shard file writer to `path`. Data will be distributed into `num_shards` shards. Each shard will buffer
     /// up to `per_shard_buffer_size` items before writing a block. 2^`thread_bits` threads will be used to distribute the serialization
     /// and IO in paralle.
@@ -309,6 +310,7 @@ impl<T, S> ShardWriteManager<T, S> where T: 'static + Sync + Send + Serialize, S
         }
 
         ShardWriteManager {
+            sender_buffer_size: std::cmp::min(64, per_shard_buffer_size),
             total_shards: num_shards,
             region_manager: arc_regions,
             handles: handles,
@@ -363,7 +365,7 @@ impl<T, S> ShardWriteManager<T, S> where T: 'static + Sync + Send + Serialize, S
 }
 
 
-impl<T, S> Drop for ShardWriteManager<T, S>  where T: Sync + Send + Serialize, S: ShardDef<T>
+impl<T, S> Drop for ShardWriteManager<T, S>  where T: Send + Serialize, S: ShardDef<T>
 {
     fn drop(&mut self) {
         self.finish();
@@ -372,7 +374,7 @@ impl<T, S> Drop for ShardWriteManager<T, S>  where T: Sync + Send + Serialize, S
 
 
 /// A handle that is used to send data to the shard file.
-pub struct ShardSender<T: Sync + Send + Serialize, S: ShardDef<T>> {
+pub struct ShardSender<T: Send + Serialize, S: ShardDef<T>> {
     tx_channels: Vec<SyncSender<Option<Vec<T>>>>,
     buffers: Vec<Vec<T>>,
     buf_size: usize,
@@ -380,7 +382,7 @@ pub struct ShardSender<T: Sync + Send + Serialize, S: ShardDef<T>> {
     phantom: PhantomData<S>,
 }
 
-impl<T: Sync + Send + Serialize, S: ShardDef<T>> ShardSender<T, S> {
+impl<T: Send + Serialize, S: ShardDef<T>> ShardSender<T, S> {
     fn new(manager: &ShardWriteManager<T, S>) -> ShardSender<T, S> {
         let mut new_txs = Vec::new();
         for t in manager.txs.iter() {
@@ -391,13 +393,13 @@ impl<T: Sync + Send + Serialize, S: ShardDef<T>> ShardSender<T, S> {
 
         let mut buffers = Vec::with_capacity(n);
         for _ in 0..n {
-            buffers.push(Vec::with_capacity(256));
+            buffers.push(Vec::with_capacity(manager.sender_buffer_size));
         }
 
         ShardSender{
             tx_channels: new_txs,
             buffers: buffers,
-            buf_size: 256,
+            buf_size: manager.sender_buffer_size,
             thread_shards: n,
             phantom: PhantomData,
         }
@@ -431,7 +433,31 @@ impl<T: Sync + Send + Serialize, S: ShardDef<T>> ShardSender<T, S> {
     }
 }
 
-impl<T: Sync + Send + Serialize, S:ShardDef<T>> Drop for ShardSender<T, S> {
+impl<T: Send + Serialize, S:ShardDef<T>> Clone for ShardSender<T, S> {
+    fn clone(&self) -> Self {
+        let mut new_txs = Vec::new();
+        for t in self.tx_channels.iter() {
+            new_txs.push(t.clone())
+        }
+
+        let n = new_txs.len();
+        let mut buffers = Vec::with_capacity(n);
+        for _ in 0..n {
+            buffers.push(Vec::with_capacity(self.buf_size));
+        }
+
+        ShardSender {
+            tx_channels: new_txs,
+            buffers: buffers,
+            buf_size: self.buf_size,
+            thread_shards: n,
+            phantom: PhantomData,
+        }
+    }
+}
+
+
+impl<T: Send + Serialize, S:ShardDef<T>> Drop for ShardSender<T, S> {
     fn drop(&mut self) {
         self.finished();
     }
