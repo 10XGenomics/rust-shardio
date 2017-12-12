@@ -1,3 +1,5 @@
+// Copyright (c) 2017 10x Genomics, Inc. All rights reserved.
+
 //! Efficiently write Rust structs to shard files from multiple threads.
 
 #[macro_use]

@@ -1,3 +1,5 @@
+// Copyright (c) 2017 10x Genomics, Inc. All rights reserved.
+
 use std;
 use std::io::Write;
 use std::sync::mpsc::sync_channel;
