@@ -9,6 +9,14 @@ extern crate byteorder;
 extern crate libc;
 extern crate bincode;
 extern crate serde;
+extern crate futures_cpupool;
+extern crate futures;
+extern crate rayon;
+extern crate crossbeam_channel;
+
+
+use futures::Future;
+use futures_cpupool::CpuPool;
 
 extern crate flate2;
 
@@ -67,31 +75,32 @@ fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> Result<usize> {
 
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-/// A group of `n_items` items, from shard `shard`, sorted at position `offset`, using `block_size` bytes on-disk.
-struct ShardRecord {
+/// A group of `len_items` items, from shard `shard`, sorted at position `offset`, using `block_size` bytes on-disk.
+struct ShardRecord<K: Serialize> {
     offset: usize,
-    shard: usize,
-    block_size: usize,
-    n_items: usize
+    start_key: K,
+    end_key: K,
+    len_bytes: usize,
+    len_items: usize,
 }
 
 /// Log of shard chunks written into this file.
-struct FileRegionState {
+struct FileRegionState<K: Serialize> {
     // Current start position of next chunk
     cursor: usize,
 
     // Record of chunks written
-    regions: Vec<ShardRecord>,
+    regions: Vec<ShardRecord<K>>,
 }
 
 /// Mediate access to the shard file from multiple threads
-struct FileRegionManager {
-    state: Mutex<FileRegionState>
+struct FileRegionManager<K: Serialize> {
+    state: Mutex<FileRegionState<K>>
 }
 
-impl FileRegionManager {
+impl<K: Serialize> FileRegionManager<K> {
     pub fn new() -> FileRegionManager {
-        let state = FileRegionState {
+        let state = FileRegionState<K> {
             cursor: 4096,
             regions: Vec::new(),
         };
@@ -101,16 +110,17 @@ impl FileRegionManager {
         }
     }
 
-    pub fn register_write(&self, bucket: usize, block_size: usize, n_items: usize) -> usize
+    pub fn register_write(&self, start_key: K, end_key: K, len_bytes: usize, len_items: usize) -> usize
     {
         let mut state = self.state.lock().unwrap();
         let cur_offset = state.cursor;
         let reg = 
             ShardRecord {
                 offset: state.cursor,
-                shard: bucket,
-                block_size: block_size,
-                n_items: n_items };
+                start_key,
+                end_key,
+                len_bytes,
+                len_items };
 
         state.regions.push(reg);
         state.cursor = state.cursor + block_size;
@@ -133,39 +143,49 @@ impl FileChunkWriter {
 }
 
 /// Specify how to compute a shard id for a value of type T
-pub trait ShardDef<T>: 'static + Send {
-    fn get_shard(t: &T) -> usize;
+pub trait SortKey<T, K>: 'static + Send {
+    fn sort_key(t: &T) -> K;
 }
+
+trait PlDef<TI, TO> {
+    fn proc_item(item: T, sender: SyncSender<TO>);
+    fn finish_output(output: TO);
+}
+
+struct SimplePipeline<P: PlDef> {
+    def: PlDef,
+}
+
+impl<P: PlDef> SimplePipeline<P> {
+    pub fn new(def: PlDef, nthreads: usize) {
+        SimplePipeline {
+            def
+        }
+    }
+
+
+
+}
+
+
 
 /// Manage the buffering and writing of items for a subset of the shard space.
-struct ShardWriterThread<T, S> where T: Send + Serialize, S: ShardDef<T> {
-    thread_id: usize,
-    total_shards: usize,
-    thread_bits: usize,
-
+struct ShardWriterThread<T, S> where T: Send + Serialize, S: SortKey<T> {
+    buffer_size: usize,
     writer: FileChunkWriter,
     rx: Receiver<Option<Vec<T>>>,
-    item_buffers: Vec<Vec<T>>,
-    write_buffer: Vec<u8>,
-
+    sort_buf: Vec<T>,
+    write_buf: Vec<T>,
+    pool: CpuPool,
     phantom: PhantomData<S>,
 }
+
 
 impl<T, S> ShardWriterThread<T, S> where T: Send + serde::ser::Serialize, S: ShardDef<T>{
     fn new(
         buffer_size: usize,
-        thread_id: usize,
-        total_shards: usize,
-        thread_bits: usize,
         writer: FileChunkWriter,
         rx: Receiver<Option<Vec<T>>>) -> ShardWriterThread<T, S>{
-
-        let local_shards = total_shards >> thread_bits;
-
-        let mut item_buffers = Vec::new();
-        for _ in 0 .. local_shards {
-            item_buffers.push(Vec::with_capacity(buffer_size))
-        }
 
         ShardWriterThread {
             thread_id: thread_id,
@@ -174,8 +194,9 @@ impl<T, S> ShardWriterThread<T, S> where T: Send + serde::ser::Serialize, S: Sha
 
             writer: writer,
             rx: rx,
-            item_buffers: item_buffers,
-            write_buffer: Vec::new(),
+            fill_buf: Vec::new(),
+            write_buf: Vec::new(),
+            pool: CpuPool::new(4)
             phantom: PhantomData,
         }
     }
@@ -184,12 +205,7 @@ impl<T, S> ShardWriterThread<T, S> where T: Send + serde::ser::Serialize, S: Sha
 
         loop {
             match self.rx.recv() {
-                Ok(Some(v)) => {
-                    for item in v {
-                        self.add(item);
-                    }
-                },
-
+                Ok(Some(v)) => self.sort_buf.extend(v),
                 Ok(None) => {
                     self.flush();
                     break;
@@ -197,21 +213,25 @@ impl<T, S> ShardWriterThread<T, S> where T: Send + serde::ser::Serialize, S: Sha
 
                 Err(_) => break,
             }
+
+            if self.fill_buf.len() > self.buffer_size / 2 {
+                // wait to make sure write_buf is done
+                std::mem::swap(self.write_buf, self.fill_buf);
+
+                // 
+                self.write_buf.sort();
+                self.pool.spawn(f)
+
+            }
         }
     }
 
+    fn do_write(&self, Vec<T>) -> Vec<T> {
+
+    }
+
+
     fn add(&mut self, item: T) {
-        let key = S::get_shard(&item);
-
-        let shard = key % self.total_shards;
-        let local_shard = shard >> self.thread_bits;
-
-        let write = {
-            let buf = self.item_buffers.get_mut(local_shard).unwrap();
-            buf.push(item);
-            buf.len() == buf.capacity()
-        };
-
         if write
         {
             self.write_item_buffer(local_shard);
@@ -268,7 +288,7 @@ pub struct ShardWriteManager<T: 'static + Send + Serialize, S: ShardDef<T>> {
     sender_buffer_size: usize,
     total_shards: usize,
     handles: Vec<JoinHandle<()>>,
-    txs: Vec<SyncSender<Option<Vec<T>>>>,
+    tx: SyncSender<Option<Vec<T>>>,
     region_manager: Arc<FileRegionManager>,
     file: File,
     phantom: PhantomData<S>,
@@ -376,84 +396,58 @@ impl<T, S> Drop for ShardWriteManager<T, S>  where T: Send + Serialize, S: Shard
 
 
 /// A handle that is used to send data to the shard file.
-pub struct ShardSender<T: Send + Serialize, S: ShardDef<T>> {
-    tx_channels: Vec<SyncSender<Option<Vec<T>>>>,
-    buffers: Vec<Vec<T>>,
+pub struct ShardSender<T: Send + Serialize> {
+    tx_channel: SyncSender<Option<Vec<T>>>,
+    buffer: Vec<T>,
     buf_size: usize,
-    thread_shards: usize,
-    phantom: PhantomData<S>,
 }
 
 impl<T: Send + Serialize, S: ShardDef<T>> ShardSender<T, S> {
     fn new(manager: &ShardWriteManager<T, S>) -> ShardSender<T, S> {
-        let mut new_txs = Vec::new();
-        for t in manager.txs.iter() {
-            new_txs.push(t.clone())
-        }
 
-        let n = manager.txs.len();
-
-        let mut buffers = Vec::with_capacity(n);
-        for _ in 0..n {
-            buffers.push(Vec::with_capacity(manager.sender_buffer_size));
-        }
+        let mut new_txs = manager.tx.clone();
+        let mut buffer = Vec::with_capacity(manager.sender_buffer_size));
 
         ShardSender{
-            tx_channels: new_txs,
-            buffers: buffers,
+            tx_channel: new_tx,
+            buffer: buffer,
             buf_size: manager.sender_buffer_size,
-            thread_shards: n,
-            phantom: PhantomData,
         }
     }
 
     /// Send an item to the shard file
     pub fn send(&mut self, item: T) {
-        let shard_idx = S::get_shard(&item) % self.thread_shards;
         let send = {
-            let buf = self.buffers.get_mut(shard_idx).unwrap();
-            buf.push(item);
-            buf.len() == self.buf_size
+            self.buffer.push(item);
+            self.buffer.len() == self.buf_size
         };
 
         if send {
-            self.buffers.push(Vec::with_capacity(self.buf_size));
-            let send_buf = self.buffers.swap_remove(shard_idx);
-
-            let out_ch = self.tx_channels.get(shard_idx).unwrap();
-            out_ch.send(Some(send_buf)).unwrap();
+            let send_buf = self.buffer;
+            self.buffer = Vec::with_capacity(self.buf_size);
+            self.tx_channel.send(Some(send_buf)).unwrap();
         }
     }
 
     /// Signal that you've finished sending items to this `ShardSender`. Also called 
     /// if the `ShardSender` is dropped.
     pub fn finished(&mut self) {
-        for (idx, buf) in self.buffers.drain(..).enumerate() {
-            let out_ch = self.tx_channels.get(idx).unwrap();
-            out_ch.send(Some(buf)).unwrap();
+        if self.buffer.len() > 0 {
+            self.tx_channel.send(self.buffer)
         }
     }
 }
 
 impl<T: Send + Serialize, S:ShardDef<T>> Clone for ShardSender<T, S> {
     fn clone(&self) -> Self {
-        let mut new_txs = Vec::new();
-        for t in self.tx_channels.iter() {
-            new_txs.push(t.clone())
-        }
 
-        let n = new_txs.len();
-        let mut buffers = Vec::with_capacity(n);
-        for _ in 0..n {
-            buffers.push(Vec::with_capacity(self.buf_size));
-        }
+        let mut new_tx = self.tx.clone();
+        let mut buffer = Vec::with_capacity(self.buf_size));
 
-        ShardSender {
-            tx_channels: new_txs,
-            buffers: buffers,
-            buf_size: self.buf_size,
-            thread_shards: n,
-            phantom: PhantomData,
+        ShardSender{
+            tx_channel: new_tx,
+            buffer: buffer,
+            buf_size: self.sender_buffer_size,
         }
     }
 }

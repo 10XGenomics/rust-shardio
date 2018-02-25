@@ -14,6 +14,9 @@ byteorder = "*"
 libc = "*"
 flate2 = "*"
 lz4 = { version = "*", optional = true }
+futures-cpupool = "0.1.8"
+rayon = "*"
+crossbeam-channel = "0.1.2"
 
 [dev-dependencies]
 tempfile = "*"
