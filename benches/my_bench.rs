@@ -63,8 +63,6 @@ fn check_round_trip(disk_chunk_size: usize, producer_chunk_size: usize, buffer_s
     }
 }
 
-
-//#[test]
 fn test_shard_round_trip_big() {
     check_round_trip(256, 32,  1<<12,  1<<14);
 }

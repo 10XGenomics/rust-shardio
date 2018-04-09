@@ -241,6 +241,7 @@ impl<T: 'static + Send + Serialize, K: Ord + Serialize, S: SortKey<T,K>> ShardWr
         let (to_buffer_send, to_buffer_recv) = sync_channel(2);
         let (err_tx, err_rx) = sync_channel(16);
 
+        // Divide buffer size by 2 -- the get swaped between buffer thread and writer thread
         let mut sbt = ShardBufferThread::<T>::new(sender_buffer_size, item_buffer_size>>1, recv, to_writer_send, to_buffer_recv);
         let p2 = path.as_ref().to_owned();
 
@@ -305,7 +306,7 @@ impl<T> ShardBufferThread<T> where T: Send {
 
     fn process(&mut self) {
 
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(self.buffer_size);
 
         loop {
             match self.rx.recv() {
@@ -336,7 +337,7 @@ impl<T> ShardBufferThread<T> where T: Send {
 
         if self.second_buf == false {
             self.second_buf == true;
-            return Vec::new();
+            return Vec::with_capacity(self.buffer_size);
         } else {
             
             if !done {
@@ -691,17 +692,18 @@ impl<T, K, S> ShardReaderSet<T, K, S>
 
         chunks
     }
-
-
-
 }
 
 #[cfg(test)] 
 mod shard_tests {
     use tempfile;
     use super::*;
+    use std::collections::HashSet;
+    use std::fmt::Debug;
+    use std::iter::FromIterator;
+    use std::hash::Hash;
 
-    #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord)]
+    #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord, Hash)]
     struct T1 {
         a: u64,
         b: u32,
@@ -709,10 +711,34 @@ mod shard_tests {
         d: u8,
     }
 
+    struct FieldDSort;
+    impl SortKey<T1, u8> for FieldDSort {
+        fn sort_key(item: &T1) -> u8 {
+            item.d
+        }
+    }
+
+    fn rand_items(n: usize) -> Vec<T1> {
+       let mut items = Vec::new();
+
+        for i in 0..n {
+            let tt = T1 {
+                a: ((i/2) + (i*10) % 128 + (i*6) % 64) as u64,
+                b: i as u32,
+                c: (i * 2) as u16,
+                d: i as u8,
+            }; 
+            items.push(tt);
+        }
+
+        items
+    }
+
     #[test]
     fn test_shard_round_trip() {
 
         // Test different buffering configurations
+        check_round_trip(10,   20,    40,  1<<8);
         check_round_trip(1024, 16, 2<<14,  1<<18);
         check_round_trip(4096,  8,  2048,  1<<18);
         check_round_trip(128,   4,  1024,  1<<12);
@@ -720,14 +746,30 @@ mod shard_tests {
         check_round_trip(10,   20,    40,  1<<14);
     }
 
+    #[test]
+    fn test_shard_round_trip_sory_key() {
 
-    //#[test]
-    fn test_shard_round_trip_big() {
-        check_round_trip(512, 32,  2<<18,  1<<20);
+        // Test different buffering configurations
+        check_round_trip_sort_key(10,   20,    40,  256, true);
+        check_round_trip_sort_key(1024, 16, 2<<14,  1<<18, true);
+        check_round_trip_sort_key(4096,  8,  2048,  1<<18, true);
+        check_round_trip_sort_key(128,   4,  1024,  1<<12, true);
+        check_round_trip_sort_key(50,    2,   256,  1<<16, true);
+        check_round_trip_sort_key(10,   20,    40,  1<<14, true);
     }
 
 
+    #[test]
+    fn test_shard_round_trip_big() {
+        // Play with these settings to test perf.
+        check_round_trip_opt(1024, 64,  2<<20,  1<<20, false);
+    }
+
     fn check_round_trip(disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize, n_items: usize) {
+          check_round_trip_opt(disk_chunk_size, producer_chunk_size, buffer_size, n_items, true) 
+    }
+  
+    fn check_round_trip_opt(disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize, n_items: usize, do_read: bool) {
         
         println!("test round trip: disk_chunk_size: {}, producer_chunk_size: {}, n_items: {}", disk_chunk_size, producer_chunk_size, n_items);
 
@@ -736,50 +778,106 @@ mod shard_tests {
         // Write and close file
         let true_items = {
             let manager: ShardWriter<T1, T1> = ShardWriter::new(tmp.path(), producer_chunk_size, disk_chunk_size, buffer_size);
-            let mut true_items = Vec::new();
+            let mut true_items = rand_items(n_items);
 
             // Sender must be closed
             {
                 let mut sender = manager.get_sender();
-
-                for i in 0..n_items {
-                    let tt = T1 {
-                        a: ((i/2) + (i*10) % 128 + (i*6) % 64) as u64,
-                        b: i as u32,
-                        c: (i * 2) as u16,
-                        d: i as u8,
-                    };
-                    sender.send(tt);
-                    true_items.push(tt);
+                for item in true_items.iter() {
+                    sender.send(*item);
                 }
             }
             true_items.sort();
             true_items
         };
 
-        // Open finished file
-        let reader = ShardReader::<T1, T1>::open(tmp.path());
+        if do_read {
+            // Open finished file
+            let reader = ShardReader::<T1, T1>::open(tmp.path());
 
-        let mut all_items = Vec::new();
-        let mut buf = Vec::new();
-        reader.read_range(&Range::all(), &mut all_items, &mut buf);
+            let mut all_items = Vec::new();
+            let mut buf = Vec::new();
+            reader.read_range(&Range::all(), &mut all_items, &mut buf);
 
-        if !(true_items == all_items) {
-            println!("true len: {:?}", true_items.len());
-            println!("round trip len: {:?}", all_items.len());
-            assert!(false);
+            if !(true_items == all_items) {
+                println!("true len: {:?}", true_items.len());
+                println!("round trip len: {:?}", all_items.len());
+                assert_eq!(&true_items, &all_items);
+            }
+
+
+            // Open finished file & test chunked reads
+            let set_reader = ShardReaderSet::<T1, T1>::open(&vec![tmp.path()]);
+            let mut all_items_chunks = Vec::new();
+
+            let chunks = set_reader.make_chunks(5);
+            for c in chunks {
+                set_reader.read_range(&c, &mut all_items_chunks);
+            }
+
+            assert_eq!(&true_items, &all_items_chunks);
         }
+    }
+
+    fn check_round_trip_sort_key(disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize, n_items: usize, do_read: bool) {
+        
+        println!("test round trip: disk_chunk_size: {}, producer_chunk_size: {}, n_items: {}", disk_chunk_size, producer_chunk_size, n_items);
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+
+        // Write and close file
+        let true_items = {
+            let manager: ShardWriter<T1, u8, FieldDSort> = ShardWriter::new(tmp.path(), producer_chunk_size, disk_chunk_size, buffer_size);
+            let mut true_items = rand_items(n_items);
+
+            // Sender must be closed
+            {
+                let mut sender = manager.get_sender();
+                for item in true_items.iter() {
+                    sender.send(*item);
+                }
+            }
+            true_items.sort_by_key(|x| x.d);
+            true_items
+        };
+
+        if do_read {
+            // Open finished file
+            let reader = ShardReader::<T1, u8, FieldDSort>::open(tmp.path());
+
+            let mut all_items = Vec::new();
+            let mut buf = Vec::new();
+            reader.read_range(&Range::all(), &mut all_items, &mut buf);
+            set_compare(&true_items, &all_items);
 
 
-        // Open finished file & test chunked reads
-        let set_reader = ShardReaderSet::<T1, T1>::open(&vec![tmp.path()]);
-        let mut all_items_chunks = Vec::new();
+            // Open finished file & test chunked reads
+            let set_reader = ShardReaderSet::<T1, u8, FieldDSort>::open(&vec![tmp.path()]);
+            let mut all_items_chunks = Vec::new();
 
-        let chunks = set_reader.make_chunks(5);
-        for c in chunks {
-            set_reader.read_range(&c, &mut all_items_chunks);
+            let chunks = set_reader.make_chunks(5);
+            for c in chunks {
+                set_reader.read_range(&c, &mut all_items_chunks);
+            }
+
+            set_compare(&true_items, &all_items_chunks);
         }
+    }
 
-        assert_eq!(true_items, all_items_chunks);
+    fn set_compare<T: Eq + Debug + Clone + Hash>(s1: &Vec<T>, s2: &Vec<T>) -> bool {
+        let s1 : HashSet<T> = HashSet::from_iter(s1.iter().cloned());
+        let s2 : HashSet<T> = HashSet::from_iter(s2.iter().cloned());
+
+        if s1 == s2 {
+            return true
+        } else {
+            let s1_minus_s2 = s1.difference(&s2);
+            println!("in s1, but not s2: {:?}", s1_minus_s2);
+
+            let s2_minus_s1 = s2.difference(&s1);
+            println!("in s2, but not s1: {:?}", s2_minus_s1);
+
+            return false;
+        }
     }
 }
