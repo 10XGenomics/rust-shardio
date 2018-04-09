@@ -62,8 +62,10 @@ extern crate libc;
 extern crate bincode;
 extern crate serde;
 extern crate failure;
-
 extern crate flate2;
+extern crate futures;
+extern crate futures_cpupool;
+extern crate crossbeam_channel;
 
 #[cfg(feature = "lz4")]
 extern crate lz4;
@@ -77,8 +79,7 @@ use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::os::unix::io::{RawFd, AsRawFd};
 
-use std::sync::mpsc::{sync_channel};
-use std::sync::mpsc::{SyncSender, Receiver};
+use crossbeam_channel::{bounded, Sender, Receiver};
 use std::path::{Path};
 
 use std::thread;
@@ -216,7 +217,7 @@ pub struct ShardWriter<T,K=T,S=DefaultSort> {
 }
 
 struct ShardWriterHelper<T> {
-    tx: SyncSender<Option<Vec<T>>>,
+    tx: Sender<Option<Vec<T>>>,
     err_rx: Receiver<Error>,
     h1: Option<JoinHandle<()>>,
     h2: Option<JoinHandle<()>>,
@@ -233,13 +234,13 @@ impl<T: 'static + Send + Serialize, K: Ord + Serialize, S: SortKey<T,K>> ShardWr
     /// * `item_buffer_size` - number of items to buffer before writing data to disk. More buffering causes the data for a given interval to be 
     ///                        spread over fewer disk chunks, but requires more memory.
     pub fn new<P: AsRef<Path>>(path: P, sender_buffer_size: usize, disk_chunk_size: usize, item_buffer_size: usize) -> ShardWriter<T, K, S> {
-        let (send, recv) = sync_channel(4);
+        let (send, recv) = bounded(4);
 
         // Ping-pong of the 2 item buffer between the thread the accumulates the items, 
         // and the thread that does the IO. Need 2 slots to avoid a deadlock.
-        let (to_writer_send, to_writer_recv) = sync_channel(2);
-        let (to_buffer_send, to_buffer_recv) = sync_channel(2);
-        let (err_tx, err_rx) = sync_channel(16);
+        let (to_writer_send, to_writer_recv) = bounded(2);
+        let (to_buffer_send, to_buffer_recv) = bounded(2);
+        let (err_tx, err_rx) = bounded(16);
 
         // Divide buffer size by 2 -- the get swaped between buffer thread and writer thread
         let mut sbt = ShardBufferThread::<T>::new(sender_buffer_size, item_buffer_size>>1, recv, to_writer_send, to_buffer_recv);
@@ -282,7 +283,7 @@ struct ShardBufferThread<T> where T: Send {
     chunk_size: usize,
     buffer_size: usize,
     rx: Receiver<Option<Vec<T>>>,
-    buf_tx: SyncSender<(Vec<T>, bool)>,
+    buf_tx: Sender<(Vec<T>, bool)>,
     buf_rx: Receiver<Vec<T>>,
     second_buf: bool,
 }
@@ -293,7 +294,7 @@ impl<T> ShardBufferThread<T> where T: Send {
         chunk_size: usize,
         buffer_size: usize,
         rx: Receiver<Option<Vec<T>>>,
-        buf_tx: SyncSender<(Vec<T>, bool)>,
+        buf_tx: Sender<(Vec<T>, bool)>,
         buf_rx: Receiver<Vec<T>>) -> ShardBufferThread<T>{
 
         ShardBufferThread {
@@ -356,8 +357,8 @@ struct ShardWriterThread<T, K, S> {
     chunk_size: usize,
     writer: FileManager<K>,
     buf_rx: Receiver<(Vec<T>, bool)>,
-    buf_tx: SyncSender<Vec<T>>,
-    err_tx: SyncSender<Error>,
+    buf_tx: Sender<Vec<T>>,
+    err_tx: Sender<Error>,
     write_buffer: Vec<u8>,
     phantom: PhantomData<S>,
 }
@@ -368,9 +369,9 @@ impl<T, K, S> ShardWriterThread<T, K, S> where T: Send + Serialize, K: Ord + Ser
     fn new(
         chunk_size: usize,   
         writer: FileManager<K>,
-        err_tx: SyncSender<Error>,
+        err_tx: Sender<Error>,
         buf_rx: Receiver<(Vec<T>, bool)>,
-        buf_tx: SyncSender<Vec<T>>) -> ShardWriterThread<T, K, S>{
+        buf_tx: Sender<Vec<T>>) -> ShardWriterThread<T, K, S>{
 
         ShardWriterThread {
             chunk_size,
@@ -476,7 +477,7 @@ impl<T, K, S> ShardWriterThread<T, K, S> where T: Send + Serialize, K: Ord + Ser
 
 /// A handle that is used to send data to the shard file. Each thread
 pub struct ShardSender<T: Send> {
-    tx: SyncSender<Option<Vec<T>>>,
+    tx: Sender<Option<Vec<T>>>,
     buffer: Vec<T>,
     buf_size: usize,
 }
