@@ -1,6 +1,6 @@
 [package]
 name = "shardio"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Patrick Marks <patrick@10xgenomics.com>"]
 
 [features]
@@ -17,7 +17,13 @@ lz4 = { version = "*", optional = true }
 futures-cpupool = "0.1.8"
 rayon = "*"
 crossbeam-channel = "0.1.2"
+failure = "0.1.1"
+failure_derive = "*"
 
 [dev-dependencies]
 tempfile = "*"
+criterion = "0.2"
 
+[[bench]]
+name = "my_bench"
+harness = false

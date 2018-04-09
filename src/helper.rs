@@ -120,8 +120,8 @@ impl<T: Send + Write> Drop for ThreadProxyWriter<T> {
         self.thread_handle.take().map(|th| th.join());
     }
 }
-
-#[cfg(test)]
+/*
+//#[cfg(test)]
 mod pod_tests {
     use std::io::{Read, Write};
     use std::fs::{File};
@@ -180,3 +180,4 @@ mod pod_tests {
         assert_eq!(v1, v2);
     }
 }
+*/
