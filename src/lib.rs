@@ -57,6 +57,9 @@
 #[macro_use]
 extern crate serde_derive;
 
+#[macro_use] 
+extern crate pretty_assertions;
+
 extern crate byteorder;
 extern crate libc;
 extern crate bincode;
@@ -164,7 +167,7 @@ impl<K: Ord + Serialize> FileManager<K> {
         }
     }
 
-    fn write_block(&mut self, range: (K, K), n_items: usize, data: &Vec<u8>) -> Result<usize, Error> {
+    fn write_block(&mut self, range: (K, K), n_items: usize, data: &[u8]) -> Result<usize, Error> {
 
         let cur_offset = self.cursor;
         let reg = 
@@ -177,8 +180,8 @@ impl<K: Ord + Serialize> FileManager<K> {
             };
 
         self.regions.push(reg);
-        self.cursor = self.cursor + data.len();
-        let l = write_at(&mut self.file.as_raw_fd(), cur_offset as u64, data)?;
+        self.cursor += data.len();
+        let l = write_at(&self.file.as_raw_fd(), cur_offset as u64, data)?;
 
         Ok(l)
     }
@@ -252,14 +255,13 @@ impl<T: 'static + Send + Serialize, K: Ord + Serialize, S: SortKey<T,K>> ShardWr
                 let writer = FileManager::<K>::new(p2);
                 let mut swt = ShardWriterThread::<_,_,S>::new(disk_chunk_size, writer, err_tx, to_writer_recv, to_buffer_send);
                 swt.process() });
-        let m = 
-            ShardWriter { 
-                helper: ShardWriterHelper {tx: send, err_rx: err_rx, h1: Some(h1), h2: Some(h2) }, 
-                sender_buffer_size: sender_buffer_size,
-                p1: PhantomData,
-                p2: PhantomData 
-            };
-        m
+
+        ShardWriter { 
+            helper: ShardWriterHelper {tx: send, err_rx: err_rx, h1: Some(h1), h2: Some(h2) }, 
+            sender_buffer_size,
+            p1: PhantomData,
+            p2: PhantomData 
+        }
     }
 
     /// Get a `ShardSender`. It can be sent to another thread that is generating data.
@@ -336,17 +338,13 @@ impl<T> ShardBufferThread<T> where T: Send {
             _ => ()
         };
 
-        if self.second_buf == false {
-            self.second_buf == true;
-            return Vec::with_capacity(self.buffer_size);
+        if !self.second_buf {
+            self.second_buf = true;
+            Vec::with_capacity(self.buffer_size)
+        } else if !done {
+            self.buf_rx.recv().unwrap()
         } else {
-            
-            if !done {
-                let r = self.buf_rx.recv().unwrap();
-                return r;
-            } else {
-                return Vec::new()
-            }
+            Vec::new()
         }
     }
 }
@@ -560,7 +558,7 @@ impl<T, K, S> ShardReader<T, K, S>
 
         ShardReader {
             file: f,
-            index: index,
+            index,
             p1: PhantomData,
             p2: PhantomData,
         }
@@ -574,9 +572,7 @@ impl<T, K, S> ShardReader<T, K, S>
         let index_block_position = file.read_u64::<BigEndian>().unwrap();
         let _ = file.read_u64::<BigEndian>().unwrap();
         file.seek(SeekFrom::Start(index_block_position as u64)).unwrap();
-        let regs = deserialize_from(file, Infinite).unwrap();
-
-        regs
+        deserialize_from(file, Infinite).unwrap()
     }
 
 
@@ -630,7 +626,7 @@ pub struct ShardReaderSet<T, K, S = DefaultSort> {
 impl<T, K, S> ShardReaderSet<T, K, S> 
  where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K> {
     /// Open a set of shard files into a aggregated reader
-    pub fn open<P: AsRef<Path>>(shard_files: &Vec<P>) -> ShardReaderSet<T, K, S> {
+    pub fn open<P: AsRef<Path>>(shard_files: &[P]) -> ShardReaderSet<T, K, S> {
         let mut readers = Vec::new();
 
         for p in shard_files {
@@ -639,14 +635,14 @@ impl<T, K, S> ShardReaderSet<T, K, S>
         }
 
         ShardReaderSet{ 
-            readers: readers
+            readers
         }
     }
 
     /// Read data the given `range` into `data` buffer
     pub fn read_range(&self, range: &Range<K>, data: &mut Vec<T>) {
         let mut buf = Vec::new();
-        for r in self.readers.iter() {
+        for r in &self.readers {
             r.read_range(range, data, &mut buf)
         }
     }
@@ -659,7 +655,7 @@ impl<T, K, S> ShardReaderSet<T, K, S>
     /// Generate `num_chunks` ranges with roughly equal numbers of elements.
     pub fn make_chunks(&self, num_chunks: usize) -> Vec<Range<K>> {
         let mut starts = Vec::new();
-        for r in self.readers.iter() {
+        for r in &self.readers {
             for block in r.index.iter() {
                 let r = block.range();
                 match r.start { Some(ref v) => starts.push(v.clone()), _ => () };
@@ -763,7 +759,7 @@ mod shard_tests {
     #[test]
     fn test_shard_round_trip_big() {
         // Play with these settings to test perf.
-        check_round_trip_opt(1024, 64,  2<<20,  1<<20, false);
+        check_round_trip_opt(1024, 64,  2<<20,  1<<26, false);
     }
 
     fn check_round_trip(disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize, n_items: usize) {

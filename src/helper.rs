@@ -44,17 +44,14 @@ impl<T: 'static + Send> ThreadProxyIterator<T> {
         let (tx, rx) = bounded::<Option<T>>(max_read_ahead);
         let _ = thread::spawn(move || {
             for item in itr {
-                match tx.send(Some(item)) {
-                    Err(_) => return,
-                    _ => (),
-                }
+                if let Err(_) = tx.send(Some(item)) { return };
             } 
 
             tx.send(None).unwrap();
         });
 
         ThreadProxyIterator {
-            rx: rx,
+            rx,
             done: false
         }     
     }

@@ -42,8 +42,8 @@ impl<K: Ord> Range<K> {
     #[inline]
     /// Test if `point` in contained in the range `self`
     pub fn contains(&self, point: &K) -> bool {
-        let after_start = self.start.as_ref().map_or(true, |s| point >= &s);
-        let before_end = self.end.as_ref().map_or(true, |e| point < &e);
+        let after_start = self.start.as_ref().map_or(true, |s| point >= s);
+        let before_end = self.end.as_ref().map_or(true, |e| point < e);
         after_start && before_end
     }
 
