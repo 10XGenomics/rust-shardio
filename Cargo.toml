@@ -9,7 +9,7 @@ default = ['lz4']
 [dependencies]
 serde = "*"
 serde_derive = "*"
-bincode = "0.8.0"
+bincode = "1.0.0"
 byteorder = "*"
 libc = "*"
 flate2 = "*"

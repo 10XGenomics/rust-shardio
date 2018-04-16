@@ -90,7 +90,6 @@ use std::marker::PhantomData;
 use serde::ser::Serialize;
 use serde::de::{DeserializeOwned};
 
-use bincode::Infinite;
 use bincode::{serialize_into, deserialize_from};
 use byteorder::{BigEndian, WriteBytesExt, ReadBytesExt};
 
@@ -443,7 +442,7 @@ impl<T, K, S> ShardWriterThread<T, K, S> where T: Send + Serialize, K: Ord + Ser
 
         {
             let mut encoder = Self::get_encoder(&mut self.write_buffer)?;
-            serialize_into(&mut encoder, items, Infinite)?;
+            serialize_into(&mut encoder, items)?;
             encoder.finish();
         }
 
@@ -456,7 +455,7 @@ impl<T, K, S> ShardWriterThread<T, K, S> where T: Send + Serialize, K: Ord + Ser
 
         let mut buf = Vec::new();
 
-        serialize_into(&mut buf, &self.writer.regions, Infinite)?;
+        serialize_into(&mut buf, &self.writer.regions)?;
 
         let index_block_position = self.writer.cursor;
         let index_block_size = buf.len();
@@ -571,7 +570,7 @@ impl<T, K, S> ShardReader<T, K, S>
         let index_block_position = file.read_u64::<BigEndian>().unwrap();
         let _ = file.read_u64::<BigEndian>().unwrap();
         file.seek(SeekFrom::Start(index_block_position as u64)).unwrap();
-        deserialize_from(file, Infinite).unwrap()
+        deserialize_from(file).unwrap()
     }
 
 
@@ -598,7 +597,7 @@ impl<T, K, S> ShardReader<T, K, S>
             assert_eq!(read_len, rec.len_bytes);
                     
             let mut decoder = Self::get_decoder(buf);
-            let r: Vec<T> = deserialize_from(&mut decoder, Infinite).unwrap();
+            let r: Vec<T> = deserialize_from(&mut decoder).unwrap();
             data.extend(r.into_iter().filter(|x| range.contains(&S::sort_key(x))));
         }
 
