@@ -14,8 +14,6 @@ byteorder = "*"
 libc = "*"
 flate2 = "*"
 lz4 = { version = "*", optional = true }
-futures = "*"
-futures-cpupool = "0.1.8"
 rayon = "*"
 crossbeam-channel = "0.1.2"
 failure = "0.1.1"

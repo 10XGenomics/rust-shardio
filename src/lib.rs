@@ -66,8 +66,6 @@ extern crate bincode;
 extern crate serde;
 extern crate failure;
 extern crate flate2;
-extern crate futures;
-extern crate futures_cpupool;
 extern crate crossbeam_channel;
 
 #[cfg(feature = "lz4")]
@@ -100,6 +98,7 @@ use libc::{pread, pwrite, c_void, off_t, size_t, ssize_t};
 
 use failure::Error;
 
+pub mod pmap;
 pub mod range;
 pub mod helper;
 
@@ -744,7 +743,7 @@ mod shard_tests {
     }
 
     #[test]
-    fn test_shard_round_trip_sory_key() {
+    fn test_shard_round_trip_sort_key() {
 
         // Test different buffering configurations
         check_round_trip_sort_key(10,   20,    40,  256, true);
@@ -759,7 +758,7 @@ mod shard_tests {
     #[test]
     fn test_shard_round_trip_big() {
         // Play with these settings to test perf.
-        check_round_trip_opt(1024, 64,  2<<20,  1<<26, false);
+        check_round_trip_opt(1024, 64,  2<<20,  1<<20, false);
     }
 
     fn check_round_trip(disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize, n_items: usize) {
