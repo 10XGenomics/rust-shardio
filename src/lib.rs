@@ -44,7 +44,8 @@
 //! 
 //!     let chunks = reader.make_chunks(5);
 //!     for c in chunks {
-//!         reader.read_range(&c, &mut all_items);
+//!         let mut range_iter = reader.iter_range(&c);
+//!         all_items.extend(range_iter);
 //!     }
 //! 
 //!     // Data will be return in sorted order
@@ -473,7 +474,9 @@ impl<T, K, S> ShardWriterThread<T, K, S> where T: Send + Serialize, K: Ord + Ser
 }
 
 
-/// A handle that is used to send data to the shard file. Each thread
+/// A handle that is used to send data to a `ShardWriter`. Each thread that is producing data 
+/// needs it's own ShardSender. A `ShardSender` can be obtained with the `get_sender` method of
+/// `ShardWriter`.
 pub struct ShardSender<T: Send> {
     tx: Sender<Option<Vec<T>>>,
     buffer: Vec<T>,
@@ -507,7 +510,7 @@ impl<T: Send> ShardSender<T> {
         }
     }
 
-    /// Signal that you've finished sending items to this `ShardSender`. Also called 
+    /// Signal that you've finished sending items to this `ShardSender`. `finished` will called 
     /// if the `ShardSender` is dropped.
     pub fn finished(&mut self) {
         if self.buffer.len() > 0 {
@@ -688,7 +691,7 @@ impl<T,K,S> Eq for MergeVec<T,K,S> where K: Ord {
 use std::cmp::Ordering;
 
 
-
+/// Iterator of items from a single shardio reader
 pub struct ShardItemIter<'a, T: 'a, K: 'a, S: 'a> {
     reader: &'a ShardReader<T, K, S>,
     buf: Vec<u8>,
@@ -700,7 +703,7 @@ pub struct ShardItemIter<'a, T: 'a, K: 'a, S: 'a> {
 impl<'a, T, K, S> ShardItemIter<'a, T, K, S> 
 where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K>
 {
-    pub fn new(reader: &'a ShardReader<T,K,S>, range: Range<K>) -> ShardItemIter<'a,T,K,S> {
+    fn new(reader: &'a ShardReader<T,K,S>, range: Range<K>) -> ShardItemIter<'a,T,K,S> {
         let mut buf = Vec::new();
 
         let shards : Vec<&ShardRecord<K>> = 
@@ -790,17 +793,18 @@ where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K>
     }
 }
 
-pub struct MergeIterator<I,T,K,S> {
-    iterators: Vec<I>,
+/// Iterator over merged shardio files
+pub struct MergeIterator<'a,T:'a,K:'a,S:'a> {
+    iterators: Vec<ShardItemIter<'a,T,K,S>>,
     next_values: Vec<Option<T>>,
     merge_heap: MinMaxHeap<(K, usize)>,
     phantom_k: PhantomData<K>,
     phantom_s: PhantomData<S>,
 }
 
-impl<I, T, K, S>  MergeIterator<I, T, K, S> 
-where K: Clone + Ord, S: SortKey<T,K>, I: Iterator<Item=T> {
-    pub fn new(mut iterators: Vec<I>) -> MergeIterator<I,T,K,S> {
+impl<'a, T, K, S>  MergeIterator<'a, T, K, S> 
+where K: Clone + Ord, S: SortKey<T,K>, ShardItemIter<'a,T,K,S>: Iterator<Item=T> {
+    fn new(mut iterators: Vec<ShardItemIter<'a,T,K,S>>) -> MergeIterator<'a,T,K,S> {
 
         let mut next_values = Vec::new();
         let mut merge_heap = MinMaxHeap::new();
@@ -828,8 +832,10 @@ where K: Clone + Ord, S: SortKey<T,K>, I: Iterator<Item=T> {
     }
 }
 
-impl<'a, I, T, K, S> Iterator for MergeIterator<I, T, K, S> 
-where K: Clone + Ord, S: SortKey<T,K>, I: Iterator<Item=T>
+use std::iter::Iterator;
+
+impl<'a, T: 'a, K: 'a, S: 'a> Iterator for MergeIterator<'a, T, K, S> 
+where K: Clone + Ord, S: SortKey<T,K>, ShardItemIter<'a,T,K,S>: Iterator<Item=T>
 {
     type Item = T;
 
@@ -860,7 +866,9 @@ where K: Clone + Ord, S: SortKey<T,K>, I: Iterator<Item=T>
 
 
 
-/// Read from a collection of shard io files.
+/// Read from a collection of shardio files. The input data is merged to give
+/// a single sorted view of the combined dataset. The input files must
+/// be created with the same sort order `S` as they are read with.
 pub struct ShardReaderSet<T, K, S = DefaultSort> {
     readers: Vec<ShardReader<T, K, S>>
 }
@@ -868,7 +876,7 @@ pub struct ShardReaderSet<T, K, S = DefaultSort> {
 
 impl<T, K, S> ShardReaderSet<T, K, S> 
  where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K> {
-    /// Open a set of shard files into a aggregated reader
+    /// Open a set of shard files into an aggregated reader
     pub fn open<P: AsRef<Path>>(shard_files: &[P]) -> ShardReaderSet<T, K, S> {
         let mut readers = Vec::new();
 
@@ -890,10 +898,16 @@ impl<T, K, S> ShardReaderSet<T, K, S>
         }
     }
 
-    pub fn iter_range<'a>(&'a self, range: &Range<K>) -> MergeIterator<ShardItemIter<'a,T,K,S>,T,K,S> {
+    /// Iterate over items in the given `range`
+    pub fn iter_range<'a>(&'a self, range: &Range<K>) -> MergeIterator<'a,T,K,S> {
         let iters: Vec<_> = self.readers.iter().map(|r| r.iter_range(range)).collect();
         MergeIterator::new(iters)
     }
+
+    /// Iterate over all items
+     pub fn iter<'a>(&'a self) -> MergeIterator<'a,T,K,S> {
+        self.iter_range(&Range::all())
+     }
 
     /// Total number of items
     pub fn len(&self) -> usize {
@@ -901,6 +915,7 @@ impl<T, K, S> ShardReaderSet<T, K, S>
     }
 
     /// Generate `num_chunks` ranges with roughly equal numbers of elements.
+    /// The ranges can be fed to `iter_range`
     pub fn make_chunks(&self, num_chunks: usize) -> Vec<Range<K>> {
         let mut starts = Vec::new();
         for r in &self.readers {
