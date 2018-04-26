@@ -1,6 +1,6 @@
 [package]
 name = "shardio"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Patrick Marks <patrick@10xgenomics.com>"]
 
 [features]
@@ -9,12 +9,21 @@ default = ['lz4']
 [dependencies]
 serde = "*"
 serde_derive = "*"
-bincode = "0.8.0"
+bincode = "1.0.0"
 byteorder = "*"
 libc = "*"
 flate2 = "*"
 lz4 = { version = "*", optional = true }
+rayon = "*"
+crossbeam-channel = "0.1.2"
+failure = "0.1.1"
+failure_derive = "*"
+pretty_assertions = "0.5.1"
 
 [dev-dependencies]
 tempfile = "*"
+criterion = "0.2"
 
+[[bench]]
+name = "my_bench"
+harness = false

@@ -2,15 +2,14 @@
 
 use std;
 use std::io::Write;
-use std::sync::mpsc::sync_channel;
-use std::sync::mpsc::{SyncSender, Receiver, RecvError};
+use crossbeam_channel::{bounded, Sender, Receiver, RecvError};
 use std::thread;
 use std::thread::JoinHandle;
 use std::io;
 use std::marker::PhantomData;
 
-
-pub struct ThreadProxyIterator<T: Send> {
+/// Execute an iterator on a worker thread, which can work ahead a configurable number of items
+pub struct ThreadProxyIterator<T> {
     rx: Receiver<Option<T>>,
     done: bool
 }
@@ -29,27 +28,30 @@ impl<T: Send> Iterator for ThreadProxyIterator<T> {
                 self.done = true;
                 None
             },
+
+            // FIXME - if the producer thread dies, the iterator
+            // silently exits, without an error.
             Err(_) => None
         }
     }
 }
 
 impl<T: 'static + Send> ThreadProxyIterator<T> {
-    pub fn new<I: 'static + Send + Iterator<Item=T>>(itr: I, buf: usize) -> ThreadProxyIterator<T> {
-        let (tx, rx) = sync_channel::<Option<T>>(buf);
+    /// Iterate through `itr` on a newly created thread, and send items back to the returned
+    /// `ThreadProxyIterator` for consumption on the calling thread. The worker thread will
+    /// continue to produce elements until it is `max_read_ahead` items ahead of the consumer iterator.
+    pub fn new<I: 'static + Send + Iterator<Item=T>>(itr: I, max_read_ahead: usize) -> ThreadProxyIterator<T> {
+        let (tx, rx) = bounded::<Option<T>>(max_read_ahead);
         let _ = thread::spawn(move || {
             for item in itr {
-                match tx.send(Some(item)) {
-                    Err(_) => return,
-                    _ => (),
-                }
+                if let Err(_) = tx.send(Some(item)) { return };
             } 
 
             tx.send(None).unwrap();
         });
 
         ThreadProxyIterator {
-            rx: rx,
+            rx,
             done: false
         }     
     }
@@ -61,13 +63,13 @@ pub struct ThreadProxyWriter<T: Send + Write> {
     buf_size: usize,
     buf: Vec<u8>,
     thread_handle: Option<JoinHandle<Result<usize, RecvError>>>,
-    tx: SyncSender<Option<Vec<u8>>>,
+    tx: Sender<Option<Vec<u8>>>,
     phantom: PhantomData<T>,
 }
 
 impl<T: 'static + Send + Write> ThreadProxyWriter<T> {
     pub fn new(mut writer: T, buffer_size: usize) -> ThreadProxyWriter<T> {
-        let (tx, rx) = sync_channel::<Option<Vec<u8>>>(10);
+        let (tx, rx) = bounded::<Option<Vec<u8>>>(10);
 
         let handle = thread::spawn(move || {
             let mut total = 0;
@@ -121,19 +123,12 @@ impl<T: Send + Write> Drop for ThreadProxyWriter<T> {
     }
 }
 
+
 #[cfg(test)]
-mod pod_tests {
+mod thread_tests {
     use std::io::{Read, Write};
     use std::fs::{File};
     use tempfile;
-
-    #[derive(Copy, Clone, Eq, PartialEq)]
-    struct T1 {
-        a: u64,
-        b: u32,
-        c: u16,
-        d: u8,
-    }
 
     #[test]
     fn thread_iterate_test() {
@@ -162,7 +157,7 @@ mod pod_tests {
             let w2 = File::create(tmp2.path()).unwrap();
             let mut p2 = super::ThreadProxyWriter::new(w2, 4096);
 
-            for i in 0 .. 1000000 {
+            for i in 0 .. 100000 {
                 let cc = format!("a: {}, b: {}\n", i, i+1);
                 let _ = w1.write(cc.as_bytes());
                 let _ = p2.write(cc.as_bytes());            
