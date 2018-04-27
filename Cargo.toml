@@ -19,6 +19,7 @@ crossbeam-channel = "0.1.2"
 failure = "0.1.1"
 failure_derive = "*"
 pretty_assertions = "0.5.1"
+min-max-heap = "1.0.2"
 
 [dev-dependencies]
 tempfile = "*"

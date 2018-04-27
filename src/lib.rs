@@ -44,7 +44,8 @@
 //! 
 //!     let chunks = reader.make_chunks(5);
 //!     for c in chunks {
-//!         reader.read_range(&c, &mut all_items);
+//!         let mut range_iter = reader.iter_range(&c);
+//!         all_items.extend(range_iter);
 //!     }
 //! 
 //!     // Data will be return in sorted order
@@ -67,13 +68,13 @@ extern crate serde;
 extern crate failure;
 extern crate flate2;
 extern crate crossbeam_channel;
+extern crate min_max_heap;
 
 #[cfg(feature = "lz4")]
 extern crate lz4;
 
 #[cfg(test)]
 extern crate tempfile;
-
 
 
 use std::fs::File;
@@ -83,6 +84,7 @@ use std::os::unix::io::{RawFd, AsRawFd};
 use crossbeam_channel::{bounded, Sender, Receiver};
 use std::path::{Path};
 
+use min_max_heap::MinMaxHeap;
 use std::thread;
 use std::thread::JoinHandle;
 use std::marker::PhantomData;
@@ -99,6 +101,7 @@ use failure::Error;
 
 pub mod pmap;
 pub mod range;
+use range::Rorder;
 pub mod helper;
 
 pub use range::Range;
@@ -471,7 +474,9 @@ impl<T, K, S> ShardWriterThread<T, K, S> where T: Send + Serialize, K: Ord + Ser
 }
 
 
-/// A handle that is used to send data to the shard file. Each thread
+/// A handle that is used to send data to a `ShardWriter`. Each thread that is producing data 
+/// needs it's own ShardSender. A `ShardSender` can be obtained with the `get_sender` method of
+/// `ShardWriter`.
 pub struct ShardSender<T: Send> {
     tx: Sender<Option<Vec<T>>>,
     buffer: Vec<T>,
@@ -505,7 +510,7 @@ impl<T: Send> ShardSender<T> {
         }
     }
 
-    /// Signal that you've finished sending items to this `ShardSender`. Also called 
+    /// Signal that you've finished sending items to this `ShardSender`. `finished` will called 
     /// if the `ShardSender` is dropped.
     pub fn finished(&mut self) {
         if self.buffer.len() > 0 {
@@ -588,7 +593,6 @@ impl<T, K, S> ShardReader<T, K, S>
         ZlibDecoder::new(buffer.as_slice())
     }
 
-
     pub fn read_range(&self, range: &Range<K>, data: &mut Vec<T>, buf: &mut Vec<u8>) {
 
         for rec in self.index.iter().cloned().filter(|x| x.range().intersects(range)) {
@@ -604,6 +608,19 @@ impl<T, K, S> ShardReader<T, K, S>
         data.sort_by_key(S::sort_key);
     }
 
+    pub fn iter_range(&self, range: &Range<K>) -> ShardItemIter<T,K,S> {
+        ShardItemIter::new(&self, range.clone())   
+    }
+
+    fn read_shard(&self, rec: &ShardRecord<K>, buf: &mut Vec<u8>) -> Vec<T> {
+        buf.resize(rec.len_bytes, 0);
+        let read_len = read_at(&self.file.as_raw_fd(), rec.offset as u64, buf.as_mut_slice()).unwrap();
+        assert_eq!(read_len, rec.len_bytes);
+                    
+        let mut decoder = Self::get_decoder(buf);
+        deserialize_from(&mut decoder).unwrap()
+    }
+
     pub fn data_range(&self) -> Range<K> {
         let start = self.index.iter().map(|x| x.start_key.clone()).min();
         let end = self.index.iter().map(|x| x.end_key.clone()).max();
@@ -615,7 +632,243 @@ impl<T, K, S> ShardReader<T, K, S>
     }
 }
 
-/// Read from a collection of shard io files.
+struct MergeVec<T, K, S> {
+    current_key: K,
+    items: Vec<T>,
+    phantom: PhantomData<S>,
+}
+
+impl<T,K,S> MergeVec<T,K,S> where S:SortKey<T,K>, K:Ord {
+    pub fn new(items: Vec<T>) -> MergeVec<T,K,S> {
+        assert!(items.len() > 0);
+
+        MergeVec {
+            current_key: S::sort_key(&items[items.len() - 1]),
+            items: items,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn pop(mut self) -> (T, Option<MergeVec<T,K,S>>) {
+        let item = self.items.pop().unwrap();
+
+        if self.items.len() == 0 {
+            (item, None)
+        } else {
+            (item, 
+            Some(MergeVec {
+                current_key: S::sort_key(&self.items[self.items.len() -1]),
+                items: self.items,
+                phantom: PhantomData,
+            }))
+        }
+    }
+}
+
+impl<T,K,S> Ord for MergeVec<T,K,S> where K: Ord {
+    fn cmp(&self, other: &MergeVec<T,K,S>) -> Ordering {
+        self.current_key.cmp(&other.current_key)
+    }
+}
+
+impl<T,K,S> PartialOrd for MergeVec<T,K,S> where K: Ord {
+
+    fn partial_cmp(&self, other: &MergeVec<T,K,S>) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T,K,S> PartialEq for MergeVec<T,K,S> where K: Ord {
+    fn eq(&self, other: &MergeVec<T,K,S>) -> bool {
+        self.current_key == other.current_key
+    }
+}
+
+impl<T,K,S> Eq for MergeVec<T,K,S> where K: Ord {
+
+}
+
+use std::cmp::Ordering;
+
+
+/// Iterator of items from a single shardio reader
+pub struct ShardItemIter<'a, T: 'a, K: 'a, S: 'a> {
+    reader: &'a ShardReader<T, K, S>,
+    buf: Vec<u8>,
+    range: Range<K>,
+    active_queue: MinMaxHeap<MergeVec<T,K,S>>,
+    waiting_queue: MinMaxHeap<&'a ShardRecord<K>>,
+}
+
+impl<'a, T, K, S> ShardItemIter<'a, T, K, S> 
+where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K>
+{
+    fn new(reader: &'a ShardReader<T,K,S>, range: Range<K>) -> ShardItemIter<'a,T,K,S> {
+        let mut buf = Vec::new();
+
+        let shards : Vec<&ShardRecord<K>> = 
+            reader.index.iter().
+                         filter(|x| x.range().intersects(&range)).
+                         collect();
+
+        let min_item = shards.iter().map(|x| x.start_key.clone()).min();
+        let mut active_queue = MinMaxHeap::new();
+        let mut waiting_queue = MinMaxHeap::new();
+
+        for s in shards {
+            if Some(s.start_key.clone()) == min_item {
+                let mut items = reader.read_shard(s, &mut buf);
+                items.reverse();
+                let vec = MergeVec::new(items);
+                active_queue.push(vec);
+            } else {
+                waiting_queue.push(s);
+            }
+        }
+
+        ShardItemIter {
+            reader,
+            buf,
+            range,
+            active_queue,
+            waiting_queue,
+        }
+    }
+
+    /// What key is next among the active set
+    fn peek_active_next(&self) -> Option<K> {
+        let n = self.active_queue.peek_min();
+        n.map(|v| v.current_key.clone())
+    }
+
+    /// Activate any relevant
+    fn activate_shards(&mut self) {
+        // What key would be next?
+        let possible_next = self.peek_active_next();
+        
+        // Restore all the shards that start before this item, or the next usable shard
+        while self.waiting_queue.peek_min().map_or(false, |vec| Some(vec.start_key.clone()) < possible_next) || 
+              (self.active_queue.len() == 0 && possible_next.is_none() && self.waiting_queue.len() > 0) {
+            let shard = self.waiting_queue.pop_min().unwrap();
+            let mut items = self.reader.read_shard(shard, &mut self.buf);
+            items.reverse();
+            let vec = MergeVec::new(items);
+            self.active_queue.push(vec);
+        }
+    }
+
+    // Get the next item to return among active vecs
+    fn next_active(&mut self) -> Option<T> {
+        self.active_queue.pop_min().map(|vec| {
+            let (item, new_vec) = vec.pop();
+            
+            match new_vec {
+                Some(v) => self.active_queue.push(v),
+                _ => (),
+            }
+            item
+        })
+    }
+}
+
+impl<'a, T, K, S> Iterator for ShardItemIter<'a, T, K, S> 
+where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K>
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        self.activate_shards();
+
+        match self.next_active() {
+            Some(v) => {
+                let c = self.range.cmp(&S::sort_key(&v));
+                match c {
+                    Rorder::Before => self.next(),
+                    Rorder::Intersects => Some(v),
+                    Rorder::After => None,
+                }
+            },
+            None => None,
+        }
+    }
+}
+
+/// Iterator over merged shardio files
+pub struct MergeIterator<'a,T:'a,K:'a,S:'a> {
+    iterators: Vec<ShardItemIter<'a,T,K,S>>,
+    next_values: Vec<Option<T>>,
+    merge_heap: MinMaxHeap<(K, usize)>,
+    phantom_k: PhantomData<K>,
+    phantom_s: PhantomData<S>,
+}
+
+impl<'a, T, K, S>  MergeIterator<'a, T, K, S> 
+where K: Clone + Ord, S: SortKey<T,K>, ShardItemIter<'a,T,K,S>: Iterator<Item=T> {
+    fn new(mut iterators: Vec<ShardItemIter<'a,T,K,S>>) -> MergeIterator<'a,T,K,S> {
+
+        let mut next_values = Vec::new();
+        let mut merge_heap = MinMaxHeap::new();
+
+        for (idx, itr) in iterators.iter_mut().enumerate() {
+            let item = itr.next();
+
+            // If we have a next item, add it's key to the heap
+            item.as_ref().map(|ii| {
+                let k = S::sort_key(ii);
+                merge_heap.push((k, idx));
+            });
+
+            // Add current item of iterator to next_values
+            next_values.push(item);
+        }
+
+        MergeIterator {
+            iterators,
+            next_values,
+            merge_heap,
+            phantom_k: PhantomData,
+            phantom_s: PhantomData,
+        }
+    }
+}
+
+use std::iter::Iterator;
+
+impl<'a, T: 'a, K: 'a, S: 'a> Iterator for MergeIterator<'a, T, K, S> 
+where K: Clone + Ord, S: SortKey<T,K>, ShardItemIter<'a,T,K,S>: Iterator<Item=T>
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        let next_itr = self.merge_heap.pop_min();
+
+        next_itr.map(|(_, i)| {
+            assert!(self.next_values[i].is_some());
+
+            // Get next-next value for this iterator
+            let mut next = self.iterators[i].next();
+
+            // Push the next-next key onto the heap
+            match next {
+                Some(ref v) => self.merge_heap.push((S::sort_key(v), i)),
+                _ => ()
+            };
+
+            // Swap the value to return with the next-next value
+            std::mem::swap(&mut self.next_values[i], &mut next);
+
+            // Return. Heap should not have pointers to exhausted iterators.
+            next.unwrap()
+        })
+    }
+}
+
+
+
+
+/// Read from a collection of shardio files. The input data is merged to give
+/// a single sorted view of the combined dataset. The input files must
+/// be created with the same sort order `S` as they are read with.
 pub struct ShardReaderSet<T, K, S = DefaultSort> {
     readers: Vec<ShardReader<T, K, S>>
 }
@@ -623,7 +876,7 @@ pub struct ShardReaderSet<T, K, S = DefaultSort> {
 
 impl<T, K, S> ShardReaderSet<T, K, S> 
  where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K> {
-    /// Open a set of shard files into a aggregated reader
+    /// Open a set of shard files into an aggregated reader
     pub fn open<P: AsRef<Path>>(shard_files: &[P]) -> ShardReaderSet<T, K, S> {
         let mut readers = Vec::new();
 
@@ -645,12 +898,24 @@ impl<T, K, S> ShardReaderSet<T, K, S>
         }
     }
 
+    /// Iterate over items in the given `range`
+    pub fn iter_range<'a>(&'a self, range: &Range<K>) -> MergeIterator<'a,T,K,S> {
+        let iters: Vec<_> = self.readers.iter().map(|r| r.iter_range(range)).collect();
+        MergeIterator::new(iters)
+    }
+
+    /// Iterate over all items
+     pub fn iter<'a>(&'a self) -> MergeIterator<'a,T,K,S> {
+        self.iter_range(&Range::all())
+     }
+
     /// Total number of items
     pub fn len(&self) -> usize {
         self.readers.iter().map(|r| r.len()).sum()
     }
 
     /// Generate `num_chunks` ranges with roughly equal numbers of elements.
+    /// The ranges can be fed to `iter_range`
     pub fn make_chunks(&self, num_chunks: usize) -> Vec<Range<K>> {
         let mut starts = Vec::new();
         for r in &self.readers {
@@ -733,6 +998,7 @@ mod shard_tests {
     fn test_shard_round_trip() {
 
         // Test different buffering configurations
+        check_round_trip(10,   20,    0,  1<<8);
         check_round_trip(10,   20,    40,  1<<8);
         check_round_trip(1024, 16, 2<<14,  1<<18);
         check_round_trip(4096,  8,  2048,  1<<18);
@@ -745,6 +1011,7 @@ mod shard_tests {
     fn test_shard_round_trip_sort_key() {
 
         // Test different buffering configurations
+        check_round_trip_sort_key(10,   20,    0,  256, true);
         check_round_trip_sort_key(10,   20,    40,  256, true);
         check_round_trip_sort_key(1024, 16, 2<<14,  1<<18, true);
         check_round_trip_sort_key(4096,  8,  2048,  1<<18, true);
@@ -757,7 +1024,7 @@ mod shard_tests {
     #[test]
     fn test_shard_round_trip_big() {
         // Play with these settings to test perf.
-        check_round_trip_opt(1024, 64,  2<<20,  1<<20, false);
+        check_round_trip_opt(1024, 64,  1<<18,  1<<20, false);
     }
 
     fn check_round_trip(disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize, n_items: usize) {
@@ -790,9 +1057,8 @@ mod shard_tests {
             // Open finished file
             let reader = ShardReader::<T1, T1>::open(tmp.path());
 
-            let mut all_items = Vec::new();
-            let mut buf = Vec::new();
-            reader.read_range(&Range::all(), &mut all_items, &mut buf);
+            let all_items = reader.iter_range(&Range::all()).collect();
+            set_compare(&true_items, &all_items);
 
             if !(true_items == all_items) {
                 println!("true len: {:?}", true_items.len());
@@ -807,7 +1073,8 @@ mod shard_tests {
 
             let chunks = set_reader.make_chunks(5);
             for c in chunks {
-                set_reader.read_range(&c, &mut all_items_chunks);
+                let itr = set_reader.iter_range(&c);
+                all_items_chunks.extend(itr);
             }
 
             assert_eq!(&true_items, &all_items_chunks);
@@ -840,9 +1107,7 @@ mod shard_tests {
             // Open finished file
             let reader = ShardReader::<T1, u8, FieldDSort>::open(tmp.path());
 
-            let mut all_items = Vec::new();
-            let mut buf = Vec::new();
-            reader.read_range(&Range::all(), &mut all_items, &mut buf);
+            let mut all_items = reader.iter_range(&Range::all()).collect();
             set_compare(&true_items, &all_items);
 
 
@@ -852,7 +1117,8 @@ mod shard_tests {
 
             let chunks = set_reader.make_chunks(5);
             for c in chunks {
-                set_reader.read_range(&c, &mut all_items_chunks);
+                let itr = set_reader.iter_range(&c);
+                all_items_chunks.extend(itr);
             }
 
             set_compare(&true_items, &all_items_chunks);
