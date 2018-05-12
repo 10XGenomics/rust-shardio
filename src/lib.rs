@@ -358,7 +358,8 @@ struct ShardWriterThread<T, K, S> {
     buf_rx: Receiver<(Vec<T>, bool)>,
     buf_tx: Sender<Vec<T>>,
     err_tx: Sender<Error>,
-    write_buffer: Vec<u8>,
+    serialize_buffer: Vec<u8>,
+    compress_buffer: Vec<u8>,
     phantom: PhantomData<S>,
 }
 
@@ -378,7 +379,8 @@ impl<T, K, S> ShardWriterThread<T, K, S> where T: Send + Serialize, K: Ord + Ser
             err_tx,
             buf_rx,
             buf_tx,
-            write_buffer: Vec::new(),
+            serialize_buffer: Vec::new(),
+            compress_buffer: Vec::new(),
             phantom: PhantomData,
         }
     }
@@ -440,16 +442,20 @@ impl<T, K, S> ShardWriterThread<T, K, S> where T: Send + Serialize, K: Ord + Ser
 
     fn write_chunk(&mut self, items: &[T]) -> Result<usize, Error>
     {
-        self.write_buffer.clear();
+        self.serialize_buffer.clear();
+        self.compress_buffer.clear();
         let bounds = (S::sort_key(&items[0]), S::sort_key(&items[items.len() - 1]));
 
+        serialize_into(&mut self.serialize_buffer, items)?;
+
         {
-            let mut encoder = Self::get_encoder(&mut self.write_buffer)?;
-            serialize_into(&mut encoder, items)?;
+            use std::io::Write;
+            let mut encoder = Self::get_encoder(&mut self.compress_buffer)?;
+            encoder.write(&self.serialize_buffer);
             encoder.finish();
         }
 
-        self.writer.write_block(bounds, items.len(), &self.write_buffer)
+        self.writer.write_block(bounds, items.len(), &self.compress_buffer)
     }
 
 
