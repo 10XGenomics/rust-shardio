@@ -9,7 +9,7 @@ default = ['lz4']
 [dependencies]
 serde = "*"
 serde_derive = "*"
-bincode = "1.0.0"
+bincode = ">=1.0"
 byteorder = "*"
 libc = "*"
 flate2 = "*"
@@ -19,10 +19,13 @@ crossbeam-channel = "0.1.2"
 failure = "0.1.1"
 failure_derive = "*"
 pretty_assertions = "0.5.1"
+min-max-heap = "1.0.2"
 
 [dev-dependencies]
 tempfile = "*"
-criterion = "0.2"
+criterion = "0.2.3"
+fxhash = "*"
+lazy_static = "*"
 
 [[bench]]
 name = "my_bench"

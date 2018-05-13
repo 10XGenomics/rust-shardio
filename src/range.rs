@@ -1,5 +1,12 @@
 // Copyright (c) 2018 10x Genomics, Inc. All rights reserved.
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum Rorder {
+    Before,
+    Intersects,
+    After,
+}
+
 /// A range of points over the type `K`, spanning the half-open interval [`start`, `end`). A value
 /// of `None` indicates that the interval is unbounded in that direction.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -54,7 +61,18 @@ impl<K: Ord> Range<K> {
            self.start >= other.start && Range::se_lt(&self.start, &other.end) 
     }
 
+    pub fn cmp(&self, point: &K) -> Rorder {
+        if self.contains(point) {
+            Rorder::Intersects
+        } else if self.start.as_ref().map_or(false, |ref s| point < &s) {
+            Rorder::Before
+        } else {
+            Rorder::After
+        }
+    }
+
     // is `start` position s1 less then `end` position e2
+    #[inline]
     fn se_lt(s1: &Option<K>, e2 : &Option<K>) -> bool {
         match (s1, e2) {
             (&Some(ref v1), &Some(ref v2)) => v1 < v2,
@@ -81,7 +99,22 @@ mod range_tests {
         assert_eq!(r3.intersects(&r1), false);
 
         assert_eq!(r2.intersects(&r3), true);
-        assert_eq!(r3.intersects(&r2), true)
+        assert_eq!(r3.intersects(&r2), true);
+    }
+
+    #[test]
+    fn test_range_cmp() {
+        let p = 10;
+        let r1 = Range::starts_at(11);
+        assert_eq!(r1.cmp(&p), Rorder::Before);
+
+        let p = 10;
+        let r1 = Range::starts_at(8);
+        assert_eq!(r1.cmp(&p), Rorder::Intersects);
+
+        let p = 10;
+        let r1 = Range::ends_at(8);
+        assert_eq!(r1.cmp(&p), Rorder::After);
     }
 }
 
