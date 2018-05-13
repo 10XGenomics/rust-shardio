@@ -44,7 +44,7 @@ impl<T: 'static + Send> ThreadProxyIterator<T> {
         let (tx, rx) = bounded::<Option<T>>(max_read_ahead);
         let _ = thread::spawn(move || {
             for item in itr {
-                if let Err(_) = tx.send(Some(item)) { return };
+                if tx.send(Some(item)).is_err() { return };
             } 
 
             tx.send(None).unwrap();
@@ -91,7 +91,7 @@ impl<T: 'static + Send + Write> ThreadProxyWriter<T> {
             buf_size: buffer_size,
             buf: Vec::with_capacity(buffer_size),
             thread_handle: Some(handle),
-            tx: tx,
+            tx,
             phantom: PhantomData,
         }
     }

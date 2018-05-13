@@ -29,15 +29,9 @@ impl<F, U, T> WorkerThread<F, U, T> where
 {
     /// Process items & shutdown when the sender hangs up.
     fn thread_func(&self) {
-        loop {
-            if let Ok((id, input)) = self.proc_channel.recv() {
+        while let Ok((id, input)) = self.proc_channel.recv() {
                 let output = (self.f)(input);
-                match self.done_channel.send((id, output)) {
-                    _ => ()
-                }
-            } else {
-                break;
-            }
+                let _ = self.done_channel.send((id, output));
         }
     }
 }
@@ -127,7 +121,7 @@ impl<I,U,T> Iterator for StreamMapper<I, U, T> where
         }
 
         // We're done.
-        return None
+        None
     }
 }
 
