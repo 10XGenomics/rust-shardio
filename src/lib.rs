@@ -42,7 +42,7 @@
 //!     // Read back data
 //!     let mut all_items = Vec::new();
 //! 
-//!     let chunks = reader.make_chunks(5);
+//!     let chunks = reader.make_chunks(5, &Range::all());
 //!     for c in chunks {
 //!         reader.read_range(&c, &mut all_items);
 //!     }
@@ -64,6 +64,8 @@ extern crate byteorder;
 extern crate libc;
 extern crate bincode;
 extern crate serde;
+
+#[macro_use]
 extern crate failure;
 extern crate flate2;
 extern crate crossbeam_channel;
@@ -73,7 +75,6 @@ extern crate lz4;
 
 #[cfg(test)]
 extern crate tempfile;
-
 
 
 use std::fs::File;
@@ -215,13 +216,13 @@ pub struct ShardWriter<T,K=T,S=DefaultSort> {
     sender_buffer_size: usize,
     p1: PhantomData<K>,
     p2: PhantomData<S>,
+    closed: bool,
 }
 
 struct ShardWriterHelper<T> {
     tx: Sender<Option<Vec<T>>>,
-    err_rx: Receiver<Error>,
-    h1: Option<JoinHandle<()>>,
-    h2: Option<JoinHandle<()>>,
+    buffer_thread: Option<JoinHandle<()>>,
+    writer_thread: Option<JoinHandle<Result<usize, Error>>>,
 }
 
 
@@ -241,22 +242,27 @@ impl<T: 'static + Send + Serialize, K: Ord + Serialize, S: SortKey<T,K>> ShardWr
         // and the thread that does the IO. Need 2 slots to avoid a deadlock.
         let (to_writer_send, to_writer_recv) = bounded(2);
         let (to_buffer_send, to_buffer_recv) = bounded(2);
-        let (err_tx, err_rx) = bounded(16);
 
         // Divide buffer size by 2 -- the get swaped between buffer thread and writer thread
         let mut sbt = ShardBufferThread::<T>::new(sender_buffer_size, item_buffer_size>>1, recv, to_writer_send, to_buffer_recv);
         let p2 = path.as_ref().to_owned();
 
-        let h1 = thread::spawn(move || { sbt.process() });
-        let h2 = thread::spawn(
+        let buffer_thread = thread::spawn(move || { sbt.process() });
+
+        let writer_thread = thread::spawn(
             move || { 
                 let writer = FileManager::<K>::new(p2);
-                let mut swt = ShardWriterThread::<_,_,S>::new(disk_chunk_size, writer, err_tx, to_writer_recv, to_buffer_send);
+                let mut swt = ShardWriterThread::<_,_,S>::new(disk_chunk_size, writer, to_writer_recv, to_buffer_send);
                 swt.process() });
 
         ShardWriter { 
-            helper: ShardWriterHelper {tx: send, err_rx: err_rx, h1: Some(h1), h2: Some(h2) }, 
+            helper: ShardWriterHelper {
+                        tx: send,
+                        // These need to be options to work correctly with drop(). 
+                        buffer_thread: Some(buffer_thread), 
+                        writer_thread: Some(writer_thread) }, 
             sender_buffer_size,
+            closed: false,
             p1: PhantomData,
             p2: PhantomData 
         }
@@ -267,18 +273,50 @@ impl<T: 'static + Send + Serialize, K: Ord + Serialize, S: SortKey<T,K>> ShardWr
     {
         ShardSender::new(self)
     }
+
+    /// Call finish if you want to detect errors in the writer IO.
+    pub fn finish(&mut self) -> Result<usize, Error> {
+        if self.closed {
+            return Err(format_err!("ShardWriter closed twice"));
+        }
+
+        self.closed = true;
+        let _  = self.helper.tx.send(None);
+        self.helper.buffer_thread.take().map(|x| x.join()); 
+        let join_handle = self.helper.writer_thread.take().expect("called finish twice");
+        convert_thread_panic(join_handle.join())
+    }
+}
+
+fn convert_thread_panic<T>(thread_result: thread::Result<Result<T, Error>>) -> Result<T, Error> {
+    match thread_result {
+        Ok(v) => v,
+        Err(e) => {
+            if let Some(str_slice) = e.downcast_ref::<&'static str>() {
+                Err(format_err!("thread panic: {}", str_slice))
+            } else if let Some(string) = e.downcast_ref::<String>() {
+                Err(format_err!("thread panic: {}", string))
+            } else {
+                Err(format_err!("thread panic: Box<Any>"))
+            }
+        }
+    }
 }
 
 impl<T, K, S> Drop for ShardWriter<T,K,S> 
 {
     fn drop(&mut self) {
-        self.helper.tx.send(None).unwrap();
-        self.helper.h1.take().map(|x| x.join());
-        self.helper.h2.take().map(|x| x.join());
+        if !self.closed {
+            self.helper.tx.send(None).unwrap();
+            self.helper.buffer_thread.take().map(|x| x.join());
+            self.helper.writer_thread.take().map(|x| x.join());
+        }
     }
 }
 
-/// Manage the buffering and writing of items for a subset of the shard space.
+/// Manage receive and buffer items from ShardSenders
+/// Two buffers will be created & passed back and forth
+/// with the ShardWriter thread.
 struct ShardBufferThread<T> where T: Send {
     chunk_size: usize,
     buffer_size: usize,
@@ -305,6 +343,8 @@ impl<T> ShardBufferThread<T> where T: Send {
         }
     }
 
+    // Add new items to the buffer, send full buffers to the 
+    // writer thread.
     fn process(&mut self) {
 
         let mut buf = Vec::with_capacity(self.buffer_size);
@@ -348,13 +388,14 @@ impl<T> ShardBufferThread<T> where T: Send {
 }
 
 
-/// Manage the buffering and writing of items for a subset of the shard space.
+/// Sort buffered items, break large buffer into chunks.
+/// Serialize, compress and write the each chunk. The 
+/// file manager maintains the index data.
 struct ShardWriterThread<T, K, S> {
     chunk_size: usize,
     writer: FileManager<K>,
     buf_rx: Receiver<(Vec<T>, bool)>,
     buf_tx: Sender<Vec<T>>,
-    err_tx: Sender<Error>,
     write_buffer: Vec<u8>,
     phantom: PhantomData<S>,
 }
@@ -363,16 +404,14 @@ struct ShardWriterThread<T, K, S> {
 impl<T, K, S> ShardWriterThread<T, K, S> where T: Send + Serialize, K: Ord + Serialize, S: SortKey<T, K> {
 
     fn new(
-        chunk_size: usize,   
+        chunk_size: usize,
         writer: FileManager<K>,
-        err_tx: Sender<Error>,
         buf_rx: Receiver<(Vec<T>, bool)>,
         buf_tx: Sender<Vec<T>>) -> ShardWriterThread<T, K, S>{
 
         ShardWriterThread {
             chunk_size,
             writer,
-            err_tx,
             buf_rx,
             buf_tx,
             write_buffer: Vec::new(),
@@ -380,15 +419,7 @@ impl<T, K, S> ShardWriterThread<T, K, S> where T: Send + Serialize, K: Ord + Ser
         }
     }
 
-    fn process(&mut self) {
-        let v = self._process();
-        match v {
-            Ok(_) => (),
-            Err(e) => { println!("{}", e); let _ = self.err_tx.send(e); }
-        }
-    }
-
-    fn _process(&mut self) -> Result<usize, Error> {
+    fn process(&mut self) -> Result<usize, Error> {
         let mut n_items = 0;
 
         loop {
@@ -471,7 +502,8 @@ impl<T, K, S> ShardWriterThread<T, K, S> where T: Send + Serialize, K: Ord + Ser
 }
 
 
-/// A handle that is used to send data to the shard file. Each thread
+/// A handle that is used to send data to the shard file. Each thread producing data
+/// needs it's own ShardSender. ShardSender implement clone.
 pub struct ShardSender<T: Send> {
     tx: Sender<Option<Vec<T>>>,
     buffer: Vec<T>,
@@ -486,7 +518,7 @@ impl<T: Send> ShardSender<T> {
 
         ShardSender {
             tx: new_tx,
-            buffer: buffer,
+            buffer,
             buf_size: writer.sender_buffer_size,
         }
     }
@@ -508,7 +540,7 @@ impl<T: Send> ShardSender<T> {
     /// Signal that you've finished sending items to this `ShardSender`. Also called 
     /// if the `ShardSender` is dropped.
     pub fn finished(&mut self) {
-        if self.buffer.len() > 0 {
+        if !self.buffer.is_empty() {
             let mut send_buf = Vec::new();
             std::mem::swap(&mut send_buf, &mut self.buffer);
             self.tx.send(Some(send_buf)).unwrap();
@@ -524,7 +556,7 @@ impl<T: Send + Serialize> Clone for ShardSender<T> {
 
         ShardSender{
             tx: new_tx,
-            buffer: buffer,
+            buffer,
             buf_size: self.buf_size,
         }
     }
@@ -637,7 +669,7 @@ impl<T, K, S> ShardReaderSet<T, K, S>
         }
     }
 
-    /// Read data the given `range` into `data` buffer
+    /// Read data from the given `range` into `data` buffer. The `data` buffer is not cleared before adding items.
     pub fn read_range(&self, range: &Range<K>, data: &mut Vec<T>) {
         let mut buf = Vec::new();
         for r in &self.readers {
@@ -650,23 +682,31 @@ impl<T, K, S> ShardReaderSet<T, K, S>
         self.readers.iter().map(|r| r.len()).sum()
     }
 
-    /// Generate `num_chunks` ranges with roughly equal numbers of elements.
-    pub fn make_chunks(&self, num_chunks: usize) -> Vec<Range<K>> {
+    /// Generate `num_chunks` ranges covering the give `range`, each with a roughly equal numbers of elements.
+    pub fn make_chunks(&self, num_chunks: usize, range: &Range<K>) -> Vec<Range<K>> {
+
+        // Enumerate all the in-range known start locations in the dataset
         let mut starts = Vec::new();
         for r in &self.readers {
-            for block in r.index.iter() {
+            for block in &r.index {
                 let r = block.range();
-                match r.start { Some(ref v) => starts.push(v.clone()), _ => () };
+                if let Some(v) = r.start {
+                    if range.contains(&v) {
+                        starts.push(v.clone());
+                    }
+                }
             }
         }
         starts.sort();
 
+        // Divide the known start locations into chunks, and 
+        // use setup start positions.
         let mut chunk_starts = Vec::new();
         let chunks = starts.chunks(std::cmp::max(1, starts.len() / num_chunks));
         for (i, c) in chunks.enumerate() {
             let start = 
                 if i == 0 {
-                    None
+                    range.start.clone()
                 } else {
                     Some(c[0].clone())
                 };
@@ -677,12 +717,12 @@ impl<T, K, S> ShardReaderSet<T, K, S>
         for (i, start) in chunk_starts.iter().enumerate() {
             let end = 
                 if i+1 == chunk_starts.len() {
-                    None
+                    range.end.clone()
                 } else {
                     chunk_starts[i+1].clone()
                 };
 
-            chunks.push(Range { start: start.clone(), end: end })
+            chunks.push(Range { start: start.clone(), end })
         }
 
         chunks
@@ -805,7 +845,7 @@ mod shard_tests {
             let set_reader = ShardReaderSet::<T1, T1>::open(&vec![tmp.path()]);
             let mut all_items_chunks = Vec::new();
 
-            let chunks = set_reader.make_chunks(5);
+            let chunks = set_reader.make_chunks(5, &Range::all());
             for c in chunks {
                 set_reader.read_range(&c, &mut all_items_chunks);
             }
@@ -850,7 +890,7 @@ mod shard_tests {
             let set_reader = ShardReaderSet::<T1, u8, FieldDSort>::open(&vec![tmp.path()]);
             let mut all_items_chunks = Vec::new();
 
-            let chunks = set_reader.make_chunks(5);
+            let chunks = set_reader.make_chunks(5, &Range::all());
             for c in chunks {
                 set_reader.read_range(&c, &mut all_items_chunks);
             }
