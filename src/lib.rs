@@ -24,7 +24,7 @@
 //! 
 //!     {
 //!         // Open a shardio output file
-//!         let manager: ShardWriter<Test, Test> = ShardWriter::new(filename, 64, 256, 1<<16);
+//!         let manager: ShardWriter<Test, Test> = ShardWriter::new(filename, 64, 256, 1<<16).unwrap();
 //! 
 //!         // Get a handle to send data to the file
 //!         let mut sender = manager.get_sender();
@@ -159,15 +159,15 @@ struct FileManager<K> {
 }
 
 impl<K: Ord + Serialize> FileManager<K> {
-    pub fn new<P: AsRef<Path>>(path: P) -> FileManager<K> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<FileManager<K>, Error> {
 
-        let file = File::create(path).unwrap();
+        let file = File::create(path)?;
 
-        FileManager {
+        Ok(FileManager {
             cursor: 4096,
             regions: Vec::new(),
             file,
-        }
+        })
     }
 
     fn write_block(&mut self, range: (K, K), n_items: usize, data: &[u8]) -> Result<usize, Error> {
@@ -230,7 +230,11 @@ struct ShardWriterHelper<T> {
 }
 
 
-impl<T: 'static + Send + Serialize, K: Ord + Serialize, S: SortKey<T,K>> ShardWriter<T,K,S> {
+impl<T, K, S> ShardWriter<T,K,S> where
+    T: 'static + Send + Serialize, 
+    K: 'static + Send + Ord + Serialize, 
+    S: SortKey<T,K> {
+
     /// Create a writer for storing data items of type `T`.
     /// # Arguments
     /// * `path` - Path to newly created output file
@@ -239,7 +243,7 @@ impl<T: 'static + Send + Serialize, K: Ord + Serialize, S: SortKey<T,K>> ShardWr
     ///                       can be read at.
     /// * `item_buffer_size` - number of items to buffer before writing data to disk. More buffering causes the data for a given interval to be 
     ///                        spread over fewer disk chunks, but requires more memory.
-    pub fn new<P: AsRef<Path>>(path: P, sender_buffer_size: usize, disk_chunk_size: usize, item_buffer_size: usize) -> ShardWriter<T, K, S> {
+    pub fn new<P: AsRef<Path>>(path: P, sender_buffer_size: usize, disk_chunk_size: usize, item_buffer_size: usize) -> Result<ShardWriter<T, K, S>, Error> {
         let (send, recv) = bounded(4);
 
         // Ping-pong of the 2 item buffer between the thread the accumulates the items, 
@@ -253,13 +257,13 @@ impl<T: 'static + Send + Serialize, K: Ord + Serialize, S: SortKey<T,K>> ShardWr
 
         let buffer_thread = thread::spawn(move || { sbt.process() });
 
+        let writer = FileManager::<K>::new(p2)?;
         let writer_thread = thread::spawn(
             move || { 
-                let writer = FileManager::<K>::new(p2);
                 let mut swt = ShardWriterThread::<_,_,S>::new(disk_chunk_size, writer, to_writer_recv, to_buffer_send);
                 swt.process() });
 
-        ShardWriter { 
+        Ok(ShardWriter { 
             helper: ShardWriterHelper {
                         tx: send,
                         // These need to be options to work correctly with drop(). 
@@ -269,7 +273,7 @@ impl<T: 'static + Send + Serialize, K: Ord + Serialize, S: SortKey<T,K>> ShardWr
             closed: false,
             p1: PhantomData,
             p2: PhantomData 
-        }
+        })
     }
 
     /// Get a `ShardSender`. It can be sent to another thread that is generating data.
@@ -781,16 +785,18 @@ where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K>
     /// Activate any relevant
     fn activate_shards(&mut self) {
         // What key would be next?
-        let possible_next = self.peek_active_next();
+        let mut possible_next = self.peek_active_next();
         
-        // Restore all the shards that start before this item, or the next usable shard
-        while self.waiting_queue.peek_min().map_or(false, |vec| Some(vec.start_key.clone()) < possible_next) || 
-              (self.active_queue.len() == 0 && possible_next.is_none() && self.waiting_queue.len() > 0) {
+        // Restore all the shards that start at or before this item, or the next usable shard
+        while self.waiting_queue.peek_min().map_or(false, |shard| Some(shard.start_key.clone()) <= possible_next) || 
+              (possible_next.is_none() && self.waiting_queue.len() > 0) {
             let shard = self.waiting_queue.pop_min().unwrap();
             let mut items = self.reader.read_shard(shard, &mut self.buf);
             items.reverse();
             let vec = MergeVec::new(items);
             self.active_queue.push(vec);
+
+            possible_next = self.peek_active_next();
         }
     }
 
@@ -814,18 +820,19 @@ where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K>
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
-        self.activate_shards();
-
-        match self.next_active() {
-            Some(v) => {
-                let c = self.range.cmp(&S::sort_key(&v));
-                match c {
-                    Rorder::Before => self.next(),
-                    Rorder::Intersects => Some(v),
-                    Rorder::After => None,
-                }
-            },
-            None => None,
+        loop {
+            self.activate_shards();
+            match self.next_active() {
+                Some(v) => {
+                    let c = self.range.cmp(&S::sort_key(&v));
+                    match c {
+                        Rorder::Before => (),
+                        Rorder::Intersects => return Some(v),
+                        Rorder::After => return None,
+                    }
+                },
+                None => return None,
+            }
         }
     }
 }
@@ -1028,7 +1035,7 @@ mod shard_tests {
 
         for i in 0..n {
             let tt = T1 {
-                a: ((i/2) + (i*10) % 128 + (i*6) % 64) as u64,
+                a: (((i/2) + (i*10)) % 12 + (i*5) % 7) as u64,
                 b: i as u32,
                 c: (i * 2) as u16,
                 d: i as u8,
@@ -1043,40 +1050,56 @@ mod shard_tests {
     fn test_shard_round_trip() {
 
         // Test different buffering configurations
-        check_round_trip(10,   20,    0,  1<<8);
-        check_round_trip(10,   20,    40,  1<<8);
-        check_round_trip(1024, 16, 2<<14,  1<<18);
-        check_round_trip(4096,  8,  2048,  1<<18);
-        check_round_trip(128,   4,  1024,  1<<12);
-        check_round_trip(50,    2,   256,  1<<16);
-        check_round_trip(10,   20,    40,  1<<14);
+        check_round_trip(10,   20,    0,  1<<8, 32);
+        check_round_trip(10,   20,    40,  1<<8, 4);
+        check_round_trip(1024, 16, 2<<14,  1<<18, 5);
+        check_round_trip(4096,  8,  2048,  1<<18, 64);
+        check_round_trip(128,   4,  1024,  1<<12, 128);
+        check_round_trip(50,    2,   256,  1<<16, 1);
+        check_round_trip(10,   20,    40,  1<<14, 2);
+
+        check_round_trip(64,  16,  1<<15,  1<<17, 8);
+        check_round_trip(128,  16,  1<<15,  1<<18, 11);
+        check_round_trip(64,  16,  1<<15,  1<<19, 15);
     }
 
     #[test]
     fn test_shard_round_trip_sort_key() {
 
         // Test different buffering configurations
-        check_round_trip_sort_key(10,   20,    0,  256, true);
-        check_round_trip_sort_key(10,   20,    40,  256, true);
-        check_round_trip_sort_key(1024, 16, 2<<14,  1<<18, true);
-        check_round_trip_sort_key(4096,  8,  2048,  1<<18, true);
-        check_round_trip_sort_key(128,   4,  1024,  1<<12, true);
-        check_round_trip_sort_key(50,    2,   256,  1<<16, true);
-        check_round_trip_sort_key(10,   20,    40,  1<<14, true);
+        check_round_trip_sort_key(10,   20,    0,  256, 16, true);
+        check_round_trip_sort_key(10,   20,    40,  256, 1, true);
+        check_round_trip_sort_key(1024, 16, 2<<14,  1<<18, 1, true);
+        check_round_trip_sort_key(4096,  8,  2048,  1<<18, 32, true);
+        check_round_trip_sort_key(128,   4,  1024,  1<<12, 16, true);
+        check_round_trip_sort_key(50,    2,   256,  1<<16, 1, true);
+        check_round_trip_sort_key(10,   20,    40,  1<<14, 2, true);
     }
 
 
     #[test]
     fn test_shard_round_trip_big() {
         // Play with these settings to test perf.
-        check_round_trip_opt(1024, 64,  1<<18,  1<<20, false);
+        check_round_trip_opt(1024, 64,  1<<18,  1<<20, 64, false);
     }
 
-    fn check_round_trip(disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize, n_items: usize) {
-          check_round_trip_opt(disk_chunk_size, producer_chunk_size, buffer_size, n_items, true) 
+    fn check_round_trip(
+        disk_chunk_size: usize,
+        producer_chunk_size: usize,
+        buffer_size: usize,
+        n_items: usize,
+        read_chunks: usize
+    ) {
+          check_round_trip_opt(disk_chunk_size, producer_chunk_size, buffer_size, n_items, read_chunks, true) 
     }
   
-    fn check_round_trip_opt(disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize, n_items: usize, do_read: bool) {
+    fn check_round_trip_opt(
+        disk_chunk_size: usize, 
+        producer_chunk_size: usize, 
+        buffer_size: usize, 
+        n_items: usize, 
+        read_chunks: usize,
+        do_read: bool) {
         
         println!("test round trip: disk_chunk_size: {}, producer_chunk_size: {}, n_items: {}", disk_chunk_size, producer_chunk_size, n_items);
 
@@ -1084,14 +1107,17 @@ mod shard_tests {
 
         // Write and close file
         let true_items = {
-            let manager: ShardWriter<T1, T1> = ShardWriter::new(tmp.path(), producer_chunk_size, disk_chunk_size, buffer_size);
+            let manager: ShardWriter<T1, T1> = 
+                ShardWriter::new(tmp.path(), producer_chunk_size, disk_chunk_size, buffer_size).unwrap();
             let mut true_items = rand_items(n_items);
 
             // Sender must be closed
             {
-                let mut sender = manager.get_sender();
-                for item in true_items.iter() {
-                    sender.send(*item);
+                for chunk in true_items.chunks(n_items/8) {
+                    let mut sender = manager.get_sender();
+                    for item in chunk {
+                        sender.send(*item);
+                    }
                 }
             }
             true_items.sort();
@@ -1116,7 +1142,25 @@ mod shard_tests {
             let set_reader = ShardReaderSet::<T1, T1>::open(&vec![tmp.path()]);
             let mut all_items_chunks = Vec::new();
 
-            let chunks = set_reader.make_chunks(5, &Range::all());
+            // Read in chunks
+            let chunks = set_reader.make_chunks(read_chunks, &Range::all());
+            for c in chunks {
+                let itr = set_reader.iter_range(&c);
+                all_items_chunks.extend(itr);
+            }
+            assert_eq!(&true_items, &all_items_chunks);
+
+            // Read in chunks
+            all_items_chunks.clear();
+            let split_point = T1 { a: 1<<16, b:0, c:0, d:0 };
+
+            let chunks = set_reader.make_chunks(read_chunks, &Range::ends_at(split_point));
+            for c in chunks {
+                let itr = set_reader.iter_range(&c);
+                all_items_chunks.extend(itr);
+            }
+
+            let chunks = set_reader.make_chunks(read_chunks, &Range::starts_at(split_point));
             for c in chunks {
                 let itr = set_reader.iter_range(&c);
                 all_items_chunks.extend(itr);
@@ -1126,7 +1170,13 @@ mod shard_tests {
         }
     }
 
-    fn check_round_trip_sort_key(disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize, n_items: usize, do_read: bool) {
+    fn check_round_trip_sort_key(
+        disk_chunk_size: usize, 
+        producer_chunk_size: usize, 
+        buffer_size: usize, 
+        n_items: usize, 
+        read_chunks: usize,
+        do_read: bool) {
         
         println!("test round trip: disk_chunk_size: {}, producer_chunk_size: {}, n_items: {}", disk_chunk_size, producer_chunk_size, n_items);
 
@@ -1134,14 +1184,17 @@ mod shard_tests {
 
         // Write and close file
         let true_items = {
-            let manager: ShardWriter<T1, u8, FieldDSort> = ShardWriter::new(tmp.path(), producer_chunk_size, disk_chunk_size, buffer_size);
+            let manager: ShardWriter<T1, u8, FieldDSort> = 
+                ShardWriter::new(tmp.path(), producer_chunk_size, disk_chunk_size, buffer_size).unwrap();
             let mut true_items = rand_items(n_items);
 
             // Sender must be closed
             {
-                let mut sender = manager.get_sender();
-                for item in true_items.iter() {
-                    sender.send(*item);
+                for chunk in true_items.chunks(n_items/8) {
+                    let mut sender = manager.get_sender();
+                    for item in chunk {
+                        sender.send(*item);
+                    }
                 }
             }
             true_items.sort_by_key(|x| x.d);
@@ -1160,7 +1213,22 @@ mod shard_tests {
             let set_reader = ShardReaderSet::<T1, u8, FieldDSort>::open(&vec![tmp.path()]);
             let mut all_items_chunks = Vec::new();
 
-            let chunks = set_reader.make_chunks(5, &Range::all());
+            let chunks = set_reader.make_chunks(read_chunks, &Range::all());
+            for c in chunks {
+                let itr = set_reader.iter_range(&c);
+                all_items_chunks.extend(itr);
+            }
+            set_compare(&true_items, &all_items_chunks);
+
+            // Read in two seperate ranges
+            all_items_chunks.clear();
+            let chunks = set_reader.make_chunks(read_chunks, &Range::ends_at(128));
+            for c in chunks {
+                let itr = set_reader.iter_range(&c);
+                all_items_chunks.extend(itr);
+            }
+
+            let chunks = set_reader.make_chunks(read_chunks, &Range::starts_at(128));
             for c in chunks {
                 let itr = set_reader.iter_range(&c);
                 all_items_chunks.extend(itr);
