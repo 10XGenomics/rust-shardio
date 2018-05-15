@@ -141,13 +141,6 @@ struct ShardRecord<K> {
     len_items: usize,
 }
 
-
-impl<K: Ord + Clone> ShardRecord<K> {
-    fn range(&self) -> Range<K> {
-        Range::new(self.start_key.clone(), self.end_key.clone())
-    }
-}
-
 /// Log of shard chunks written into this file.
 struct FileManager<K> {
     // Current start position of next chunk
@@ -636,7 +629,7 @@ impl<T, K, S> ShardReader<T, K, S>
 
     pub fn read_range(&self, range: &Range<K>, data: &mut Vec<T>, buf: &mut Vec<u8>) {
 
-        for rec in self.index.iter().cloned().filter(|x| x.range().intersects(range)) {
+        for rec in self.index.iter().cloned().filter(|x| range.intersects_shard(x)) {
             buf.resize(rec.len_bytes, 0);
             let read_len = read_at(&self.file.as_raw_fd(), rec.offset as u64, buf.as_mut_slice()).unwrap();
             assert_eq!(read_len, rec.len_bytes);
@@ -749,7 +742,7 @@ where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K>
 
         let shards : Vec<&ShardRecord<K>> = 
             reader.index.iter().
-                         filter(|x| x.range().intersects(&range)).
+                         filter(|x| range.intersects_shard(x)).
                          collect();
 
         let min_item = shards.iter().map(|x| x.start_key.clone()).min();
@@ -961,16 +954,14 @@ impl<T, K, S> ShardReaderSet<T, K, S>
     /// Generate `num_chunks` ranges covering the give `range`, each with a roughly equal numbers of elements.
         /// The ranges can be fed to `iter_range`
     pub fn make_chunks(&self, num_chunks: usize, range: &Range<K>) -> Vec<Range<K>> {
+        assert!(num_chunks > 0);
 
         // Enumerate all the in-range known start locations in the dataset
         let mut starts = Vec::new();
         for r in &self.readers {
             for block in &r.index {
-                let r = block.range();
-                if let Some(v) = r.start {
-                    if range.contains(&v) {
-                        starts.push(v.clone());
-                    }
+                if range.contains(&block.start_key) {
+                    starts.push(block.start_key.clone());
                 }
             }
         }
@@ -1035,10 +1026,10 @@ mod shard_tests {
 
         for i in 0..n {
             let tt = T1 {
-                a: (((i/2) + (i*10)) % 12 + (i*5) % 7) as u64,
+                a: (((i/2) + (i*10)) % 3 + (i*5) % 2) as u64,
                 b: i as u32,
                 c: (i * 2) as u16,
-                d: i as u8,
+                d: ((i % 5)*10 + (if i%10 > 7 {i/10} else {0})) as u8,
             }; 
             items.push(tt);
         }
@@ -1050,47 +1041,49 @@ mod shard_tests {
     fn test_shard_round_trip() {
 
         // Test different buffering configurations
-        check_round_trip(10,   20,    0,  1<<8, 32);
-        check_round_trip(10,   20,    40,  1<<8, 4);
-        check_round_trip(1024, 16, 2<<14,  1<<18, 5);
-        check_round_trip(4096,  8,  2048,  1<<18, 64);
-        check_round_trip(128,   4,  1024,  1<<12, 128);
-        check_round_trip(50,    2,   256,  1<<16, 1);
-        check_round_trip(10,   20,    40,  1<<14, 2);
-
-        check_round_trip(64,  16,  1<<15,  1<<17, 8);
-        check_round_trip(128,  16,  1<<15,  1<<18, 11);
-        check_round_trip(64,  16,  1<<15,  1<<19, 15);
+        check_round_trip(10,   20,    0,  1<<8);
+        check_round_trip(10,   20,    40,  1<<8);
+        check_round_trip(1024, 16, 2<<14,  1<<18);
+        check_round_trip(4096,  8,  2048,  1<<18);
+        check_round_trip(128,   4,  1024,  1<<12);
+        check_round_trip(50,    2,   256,  1<<16);
+        check_round_trip(10,   20,    40,  1<<14);
     }
 
     #[test]
     fn test_shard_round_trip_sort_key() {
 
         // Test different buffering configurations
-        check_round_trip_sort_key(10,   20,    0,  256, 16, true);
-        check_round_trip_sort_key(10,   20,    40,  256, 1, true);
-        check_round_trip_sort_key(1024, 16, 2<<14,  1<<18, 1, true);
-        check_round_trip_sort_key(4096,  8,  2048,  1<<18, 32, true);
-        check_round_trip_sort_key(128,   4,  1024,  1<<12, 16, true);
-        check_round_trip_sort_key(50,    2,   256,  1<<16, 1, true);
-        check_round_trip_sort_key(10,   20,    40,  1<<14, 2, true);
+        check_round_trip_sort_key(10,   20,    0,  256, true);
+        check_round_trip_sort_key(10,   20,    40,  256, true);
+        check_round_trip_sort_key(1024, 16, 2<<14,  1<<18, true);
+        check_round_trip_sort_key(4096,  8,  2048,  1<<18, true);
+        check_round_trip_sort_key(128,   4,  1024,  1<<12, true);
+        check_round_trip_sort_key(50,    2,   256,  1<<16, true);
+        check_round_trip_sort_key(10,   20,    40,  1<<14, true);
+
+        check_round_trip_sort_key(64,  16,  1<<17,  1<<18, true);
+        check_round_trip_sort_key(128, 16,  1<<17,  1<<18, true);
+        check_round_trip_sort_key(64,  16,  1<<16,  1<<18, true);
+        check_round_trip_sort_key(128, 16,  1<<16,  1<<18, true);
+        check_round_trip_sort_key(64,  16,  1<<15,  1<<18, true);
+        check_round_trip_sort_key(128, 16,  1<<15,  1<<18, true);
     }
 
 
     #[test]
     fn test_shard_round_trip_big() {
         // Play with these settings to test perf.
-        check_round_trip_opt(1024, 64,  1<<18,  1<<20, 64, false);
+        check_round_trip_opt(1024, 64,  1<<18,  1<<20, false);
     }
 
     fn check_round_trip(
         disk_chunk_size: usize,
         producer_chunk_size: usize,
         buffer_size: usize,
-        n_items: usize,
-        read_chunks: usize
+        n_items: usize
     ) {
-          check_round_trip_opt(disk_chunk_size, producer_chunk_size, buffer_size, n_items, read_chunks, true) 
+          check_round_trip_opt(disk_chunk_size, producer_chunk_size, buffer_size, n_items, true) 
     }
   
     fn check_round_trip_opt(
@@ -1098,7 +1091,6 @@ mod shard_tests {
         producer_chunk_size: usize, 
         buffer_size: usize, 
         n_items: usize, 
-        read_chunks: usize,
         do_read: bool) {
         
         println!("test round trip: disk_chunk_size: {}, producer_chunk_size: {}, n_items: {}", disk_chunk_size, producer_chunk_size, n_items);
@@ -1137,36 +1129,20 @@ mod shard_tests {
                 assert_eq!(&true_items, &all_items);
             }
 
+            for rc in [1, 3, 8, 15].iter() {
 
-            // Open finished file & test chunked reads
-            let set_reader = ShardReaderSet::<T1, T1>::open(&vec![tmp.path()]);
-            let mut all_items_chunks = Vec::new();
+                // Open finished file & test chunked reads
+                let set_reader = ShardReaderSet::<T1, T1>::open(&vec![tmp.path()]);
+                let mut all_items_chunks = Vec::new();
 
-            // Read in chunks
-            let chunks = set_reader.make_chunks(read_chunks, &Range::all());
-            for c in chunks {
-                let itr = set_reader.iter_range(&c);
-                all_items_chunks.extend(itr);
+                // Read in chunks
+                let chunks = set_reader.make_chunks(*rc, &Range::all());
+                for c in chunks {
+                    let itr = set_reader.iter_range(&c);
+                    all_items_chunks.extend(itr);
+                }
+                assert_eq!(&true_items, &all_items_chunks);
             }
-            assert_eq!(&true_items, &all_items_chunks);
-
-            // Read in chunks
-            all_items_chunks.clear();
-            let split_point = T1 { a: 1<<16, b:0, c:0, d:0 };
-
-            let chunks = set_reader.make_chunks(read_chunks, &Range::ends_at(split_point));
-            for c in chunks {
-                let itr = set_reader.iter_range(&c);
-                all_items_chunks.extend(itr);
-            }
-
-            let chunks = set_reader.make_chunks(read_chunks, &Range::starts_at(split_point));
-            for c in chunks {
-                let itr = set_reader.iter_range(&c);
-                all_items_chunks.extend(itr);
-            }
-
-            assert_eq!(&true_items, &all_items_chunks);
         }
     }
 
@@ -1174,8 +1150,7 @@ mod shard_tests {
         disk_chunk_size: usize, 
         producer_chunk_size: usize, 
         buffer_size: usize, 
-        n_items: usize, 
-        read_chunks: usize,
+        n_items: usize,
         do_read: bool) {
         
         println!("test round trip: disk_chunk_size: {}, producer_chunk_size: {}, n_items: {}", disk_chunk_size, producer_chunk_size, n_items);
@@ -1213,28 +1188,15 @@ mod shard_tests {
             let set_reader = ShardReaderSet::<T1, u8, FieldDSort>::open(&vec![tmp.path()]);
             let mut all_items_chunks = Vec::new();
 
-            let chunks = set_reader.make_chunks(read_chunks, &Range::all());
-            for c in chunks {
-                let itr = set_reader.iter_range(&c);
-                all_items_chunks.extend(itr);
+            for rc in &[1, 4, 7, 12, 15, 21, 65] {
+                all_items_chunks.clear();
+                let chunks = set_reader.make_chunks(*rc, &Range::all());
+                for c in chunks {
+                    let itr = set_reader.iter_range(&c);
+                    all_items_chunks.extend(itr);
+                }
+                set_compare(&true_items, &all_items_chunks);
             }
-            set_compare(&true_items, &all_items_chunks);
-
-            // Read in two seperate ranges
-            all_items_chunks.clear();
-            let chunks = set_reader.make_chunks(read_chunks, &Range::ends_at(128));
-            for c in chunks {
-                let itr = set_reader.iter_range(&c);
-                all_items_chunks.extend(itr);
-            }
-
-            let chunks = set_reader.make_chunks(read_chunks, &Range::starts_at(128));
-            for c in chunks {
-                let itr = set_reader.iter_range(&c);
-                all_items_chunks.extend(itr);
-            }
-
-            set_compare(&true_items, &all_items_chunks);
         }
     }
 
