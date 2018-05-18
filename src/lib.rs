@@ -24,7 +24,11 @@
 //! 
 //!     {
 //!         // Open a shardio output file
-//!         let manager: ShardWriter<Test, Test> = ShardWriter::new(filename, 64, 256, 1<<16).unwrap();
+//!         // Parameters here  buffering, and the size of disk chunks
+//!         // which affect how many disk chunks need to be read to 
+//!         // satisfy a range query when reading.
+//!         let manager: ShardWriter<Test, Test> = 
+//!             ShardWriter::new(filename, 64, 256, 1<<16).unwrap();
 //! 
 //!         // Get a handle to send data to the file
 //!         let mut sender = manager.get_sender();
@@ -37,7 +41,7 @@
 //!     }
 //! 
 //!     // Open finished file & test chunked reads
-//!     let reader = ShardReaderSet::<Test, Test>::open(&vec![filename]);
+//!     let reader = ShardReader::<Test, Test>::open(filename);
 //! 
 //!     // Read back data
 //!     let mut all_items = Vec::new();
@@ -577,23 +581,23 @@ impl<T: Send> Drop for ShardSender<T> {
 }
 
 /// Read a shardio file
-pub struct ShardReader<T, K, S = DefaultSort> {
+struct ShardReaderSingle<T, K, S = DefaultSort> {
     file: File,
     index: Vec<ShardRecord<K>>,
     p1: PhantomData<T>,
     p2: PhantomData<S>,
 }
 
-impl<T, K, S> ShardReader<T, K, S> 
+impl<T, K, S> ShardReaderSingle<T, K, S> 
     where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K> {
     /// Open a shard file that stores `T` items.
-    pub fn open<P: AsRef<Path>>(path: P) -> ShardReader<T, K, S> {
+    fn open<P: AsRef<Path>>(path: P) -> ShardReaderSingle<T, K, S> {
         let mut f = File::open(path).unwrap();
 
         let mut index = Self::read_index_block(&mut f);
         index.sort();
 
-        ShardReader {
+        ShardReaderSingle {
             file: f,
             index,
             p1: PhantomData,
@@ -653,12 +657,6 @@ impl<T, K, S> ShardReader<T, K, S>
                     
         let mut decoder = Self::get_decoder(buf);
         deserialize_from(&mut decoder).unwrap()
-    }
-
-    pub fn data_range(&self) -> Range<K> {
-        let start = self.index.iter().map(|x| x.start_key.clone()).min();
-        let end = self.index.iter().map(|x| x.end_key.clone()).max();
-        Range { start, end }
     }
 
     pub fn len(&self) -> usize {
@@ -727,7 +725,7 @@ use std::cmp::Ordering;
 
 /// Iterator of items from a single shardio reader
 pub struct ShardItemIter<'a, T: 'a, K: 'a, S: 'a> {
-    reader: &'a ShardReader<T, K, S>,
+    reader: &'a ShardReaderSingle<T, K, S>,
     buf: Vec<u8>,
     range: Range<K>,
     active_queue: MinMaxHeap<MergeVec<T,K,S>>,
@@ -737,7 +735,7 @@ pub struct ShardItemIter<'a, T: 'a, K: 'a, S: 'a> {
 impl<'a, T, K, S> ShardItemIter<'a, T, K, S> 
 where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K>
 {
-    fn new(reader: &'a ShardReader<T,K,S>, range: Range<K>) -> ShardItemIter<'a,T,K,S> {
+    fn new(reader: &'a ShardReaderSingle<T,K,S>, range: Range<K>) -> ShardItemIter<'a,T,K,S> {
         let mut buf = Vec::new();
 
         let shards : Vec<&ShardRecord<K>> = 
@@ -906,23 +904,36 @@ where K: Clone + Ord, S: SortKey<T,K>, ShardItemIter<'a,T,K,S>: Iterator<Item=T>
 /// Read from a collection of shardio files. The input data is merged to give
 /// a single sorted view of the combined dataset. The input files must
 /// be created with the same sort order `S` as they are read with.
-pub struct ShardReaderSet<T, K, S = DefaultSort> {
-    readers: Vec<ShardReader<T, K, S>>
+pub struct ShardReader<T, K, S = DefaultSort> {
+    readers: Vec<ShardReaderSingle<T, K, S>>
 }
 
 
-impl<T, K, S> ShardReaderSet<T, K, S> 
+impl<T, K, S> ShardReader<T, K, S> 
  where T: DeserializeOwned, K: Clone + Ord + DeserializeOwned, S: SortKey<T,K> {
+
+    /// Open a single shard files into reader
+    pub fn open<P: AsRef<Path>>(shard_file: P) -> ShardReader<T, K, S> {
+        let mut readers = Vec::new();
+        let reader = ShardReaderSingle::open(shard_file);
+        readers.push(reader);
+
+        ShardReader{ 
+            readers
+        }
+    }
+
+
     /// Open a set of shard files into an aggregated reader
-    pub fn open<P: AsRef<Path>>(shard_files: &[P]) -> ShardReaderSet<T, K, S> {
+    pub fn open_set<P: AsRef<Path>>(shard_files: &[P]) -> ShardReader<T, K, S> {
         let mut readers = Vec::new();
 
         for p in shard_files {
-            let reader = ShardReader::open(p);
+            let reader = ShardReaderSingle::open(p);
             readers.push(reader);
         }
 
-        ShardReaderSet{ 
+        ShardReader{ 
             readers
         }
     }
@@ -1132,7 +1143,7 @@ mod shard_tests {
             for rc in [1, 3, 8, 15].iter() {
 
                 // Open finished file & test chunked reads
-                let set_reader = ShardReaderSet::<T1, T1>::open(&vec![tmp.path()]);
+                let set_reader = ShardReader::<T1, T1>::open(&tmp.path());
                 let mut all_items_chunks = Vec::new();
 
                 // Read in chunks
@@ -1185,7 +1196,7 @@ mod shard_tests {
 
 
             // Open finished file & test chunked reads
-            let set_reader = ShardReaderSet::<T1, u8, FieldDSort>::open(&vec![tmp.path()]);
+            let set_reader = ShardReader::<T1, u8, FieldDSort>::open(tmp.path());
             let mut all_items_chunks = Vec::new();
 
             for rc in &[1, 4, 7, 12, 15, 21, 65] {

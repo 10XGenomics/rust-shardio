@@ -71,7 +71,7 @@ fn main() {
 
         // Write and close file
         let true_items = {
-            let manager: ShardWriter<T1, T1> = ShardWriter::new(tmp.path(), producer_chunk_size, disk_chunk_size, buffer_size);
+            let manager: ShardWriter<T1, T1> = ShardWriter::new(tmp.path(), producer_chunk_size, disk_chunk_size, buffer_size).unwrap();
             let mut true_items = Vec::new();
 
             // Sender must be closed
@@ -97,8 +97,7 @@ fn main() {
         let reader = ShardReader::<T1, T1>::open(tmp.path());
 
         let mut all_items = Vec::new();
-        let mut buf = Vec::new();
-        reader.read_range(&Range::all(), &mut all_items, &mut buf);
+        reader.read_range(&Range::all(), &mut all_items);
 
         if !(true_items == all_items) {
             println!("true len: {:?}", true_items.len());
