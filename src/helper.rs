@@ -1,25 +1,25 @@
 // Copyright (c) 2017 10x Genomics, Inc. All rights reserved.
 
+use crossbeam_channel::{bounded, Receiver, RecvError, Sender};
 use std;
+use std::io;
 use std::io::Write;
-use crossbeam_channel::{bounded, Sender, Receiver, RecvError};
+use std::marker::PhantomData;
 use std::thread;
 use std::thread::JoinHandle;
-use std::io;
-use std::marker::PhantomData;
 
 /// Execute an iterator on a worker thread, which can work ahead a configurable number of items
 pub struct ThreadProxyIterator<T> {
     rx: Receiver<Option<T>>,
-    done: bool
+    done: bool,
 }
 
 impl<T: Send> Iterator for ThreadProxyIterator<T> {
-    type Item=T;
+    type Item = T;
 
     fn next(&mut self) -> Option<T> {
         if self.done {
-            return None
+            return None;
         }
 
         match self.rx.recv() {
@@ -27,11 +27,11 @@ impl<T: Send> Iterator for ThreadProxyIterator<T> {
             Ok(None) => {
                 self.done = true;
                 None
-            },
+            }
 
             // FIXME - if the producer thread dies, the iterator
             // silently exits, without an error.
-            Err(_) => None
+            Err(_) => None,
         }
     }
 }
@@ -40,24 +40,24 @@ impl<T: 'static + Send> ThreadProxyIterator<T> {
     /// Iterate through `itr` on a newly created thread, and send items back to the returned
     /// `ThreadProxyIterator` for consumption on the calling thread. The worker thread will
     /// continue to produce elements until it is `max_read_ahead` items ahead of the consumer iterator.
-    pub fn new<I: 'static + Send + Iterator<Item=T>>(itr: I, max_read_ahead: usize) -> ThreadProxyIterator<T> {
+    pub fn new<I: 'static + Send + Iterator<Item = T>>(
+        itr: I,
+        max_read_ahead: usize,
+    ) -> ThreadProxyIterator<T> {
         let (tx, rx) = bounded::<Option<T>>(max_read_ahead);
         let _ = thread::spawn(move || {
             for item in itr {
-                if tx.send(Some(item)).is_err() { return };
-            } 
+                if tx.send(Some(item)).is_err() {
+                    return;
+                };
+            }
 
             tx.send(None).unwrap();
         });
 
-        ThreadProxyIterator {
-            rx,
-            done: false
-        }     
+        ThreadProxyIterator { rx, done: false }
     }
 }
-
-
 
 pub struct ThreadProxyWriter<T: Send + Write> {
     buf_size: usize,
@@ -78,7 +78,7 @@ impl<T: 'static + Send + Write> ThreadProxyWriter<T> {
                     Ok(Some(data)) => {
                         let _ = writer.write(data.as_slice());
                         total += data.len();
-                    },
+                    }
                     Ok(None) => break,
                     Err(e) => return Err(e),
                 }
@@ -110,7 +110,7 @@ impl<T: Send + Write> Write for ThreadProxyWriter<T> {
 
     fn flush(&mut self) -> io::Result<()> {
         let old_buf = std::mem::replace(&mut self.buf, Vec::with_capacity(self.buf_size));
-        let _  = self.tx.send(Some(old_buf));
+        let _ = self.tx.send(Some(old_buf));
         Ok(())
     }
 }
@@ -123,19 +123,17 @@ impl<T: Send + Write> Drop for ThreadProxyWriter<T> {
     }
 }
 
-
 #[cfg(test)]
 mod thread_tests {
+    use std::fs::File;
     use std::io::{Read, Write};
-    use std::fs::{File};
     use tempfile;
 
     #[test]
     fn thread_iterate_test() {
+        let it1 = (0..100).map(|x| x * x);
 
-        let it1 = (0..100).map(|x| x*x);
-
-        let it2 = (0..100).map(|x| x*x);
+        let it2 = (0..100).map(|x| x * x);
         let thread_it2 = super::ThreadProxyIterator::new(it2, 10);
 
         let res1 = it1.collect::<Vec<_>>();
@@ -144,10 +142,8 @@ mod thread_tests {
         assert_eq!(res1, res2);
     }
 
-
     #[test]
     fn thread_write_test() {
-
         let tmp1 = tempfile::NamedTempFile::new().unwrap();
         let tmp2 = tempfile::NamedTempFile::new().unwrap();
 
@@ -157,10 +153,10 @@ mod thread_tests {
             let w2 = File::create(tmp2.path()).unwrap();
             let mut p2 = super::ThreadProxyWriter::new(w2, 4096);
 
-            for i in 0 .. 100000 {
-                let cc = format!("a: {}, b: {}\n", i, i+1);
+            for i in 0..100000 {
+                let cc = format!("a: {}, b: {}\n", i, i + 1);
                 let _ = w1.write(cc.as_bytes());
-                let _ = p2.write(cc.as_bytes());            
+                let _ = p2.write(cc.as_bytes());
             }
         }
 

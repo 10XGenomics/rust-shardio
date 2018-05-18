@@ -17,21 +17,20 @@ pub struct Range<K> {
     pub end: Option<K>,
 }
 
-
 impl<K: Ord + Clone> Range<K> {
     /// Create a Range object spanning the half-open interval [`start`, `end)
     pub fn new(start: K, end: K) -> Range<K> {
-        Range { 
-            start: Some(start), 
+        Range {
+            start: Some(start),
             end: Some(end),
         }
-    } 
+    }
 
     /// Create a range containing all points greater than or equal to `start`
     pub fn starts_at(start: K) -> Range<K> {
         Range {
             start: Some(start),
-            end: None
+            end: None,
         }
     }
 
@@ -39,13 +38,16 @@ impl<K: Ord + Clone> Range<K> {
     pub fn ends_at(end: K) -> Range<K> {
         Range {
             start: None,
-            end: Some(end)
+            end: Some(end),
         }
     }
 
     /// Create a range covering all points.
     pub fn all() -> Range<K> {
-        Range { start: None, end: None }
+        Range {
+            start: None,
+            end: None,
+        }
     }
 
     #[inline]
@@ -59,20 +61,22 @@ impl<K: Ord + Clone> Range<K> {
     #[inline]
     /// Test if Range `other` intersects Range `self`
     pub fn intersects(&self, other: &Range<K>) -> bool {
-        self.start <  other.start && Range::se_lt(&other.start, &self.end) ||
-           self.start >= other.start && Range::se_lt(&self.start, &other.end) 
+        self.start < other.start && Range::se_lt(&other.start, &self.end)
+            || self.start >= other.start && Range::se_lt(&self.start, &other.end)
     }
 
     #[inline]
     /// Test if Range `other` intersects Range `self`
-    pub(crate) fn intersects_shard(&self, shard: &ShardRecord<K>)  -> bool {
-        self.start < Some(shard.start_key.clone()) && Range::se_lt(&Some(shard.start_key.clone()), &self.end) ||
-           self.start >= Some(shard.start_key.clone()) && Range::shard_le(&self.start, &shard.end_key) 
+    pub(crate) fn intersects_shard(&self, shard: &ShardRecord<K>) -> bool {
+        self.start < Some(shard.start_key.clone())
+            && Range::se_lt(&Some(shard.start_key.clone()), &self.end)
+            || self.start >= Some(shard.start_key.clone())
+                && Range::shard_le(&self.start, &shard.end_key)
     }
 
     // is `start` position s1 less then inclusive `end` position e2
     #[inline]
-    fn shard_le(inclusive_start: &Option<K>, inclusive_end : &K) -> bool {
+    fn shard_le(inclusive_start: &Option<K>, inclusive_end: &K) -> bool {
         match (inclusive_start, inclusive_end) {
             (&Some(ref v1), ref v2) => v1 <= v2,
             (&None, _) => true,
@@ -91,7 +95,7 @@ impl<K: Ord + Clone> Range<K> {
 
     // is inclusive `start` position s1 less than exclusive `end` position e2
     #[inline]
-    fn se_lt(s1: &Option<K>, e2 : &Option<K>) -> bool {
+    fn se_lt(s1: &Option<K>, e2: &Option<K>) -> bool {
         match (s1, e2) {
             (&Some(ref v1), &Some(ref v2)) => v1 < v2,
             (&Some(_), &None) => true,
@@ -101,7 +105,7 @@ impl<K: Ord + Clone> Range<K> {
     }
 }
 
-#[cfg(test)] 
+#[cfg(test)]
 mod range_tests {
     use super::*;
 
@@ -127,28 +131,48 @@ mod range_tests {
         assert_eq!(r3.intersects(&r2), true);
     }
 
-
     #[test]
     fn test_shard_cmp() {
-        let def = ShardRecord { start_key: 0, end_key: 0, offset: 0, len_bytes: 0, len_items: 0 };
+        let def = ShardRecord {
+            start_key: 0,
+            end_key: 0,
+            offset: 0,
+            len_bytes: 0,
+            len_items: 0,
+        };
 
         let r1 = Range::new(5, 10);
-        let s1 = ShardRecord { start_key: 0, end_key: 5, .. def };
+        let s1 = ShardRecord {
+            start_key: 0,
+            end_key: 5,
+            ..def
+        };
         assert_eq!(r1.intersects_shard(&s1), true);
 
-        let s2 = ShardRecord { start_key: 0, end_key: 4, .. def };
+        let s2 = ShardRecord {
+            start_key: 0,
+            end_key: 4,
+            ..def
+        };
         assert_eq!(r1.intersects_shard(&s2), false);
 
-        let s3 = ShardRecord { start_key: 10, end_key: 12, .. def };
+        let s3 = ShardRecord {
+            start_key: 10,
+            end_key: 12,
+            ..def
+        };
         assert_eq!(r1.intersects_shard(&s3), false);
 
-        let s4 = ShardRecord { start_key: 9, end_key: 12, .. def};
+        let s4 = ShardRecord {
+            start_key: 9,
+            end_key: 12,
+            ..def
+        };
         assert_eq!(r1.intersects_shard(&s4), true);
     }
 
     #[test]
     fn test_range_cmp() {
-        
         let p = 10;
         let r1 = Range::starts_at(11);
         assert_eq!(r1.cmp(&p), Rorder::Before);
