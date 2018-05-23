@@ -192,8 +192,8 @@ impl<K: Ord + Serialize> FileManager<K> {
 
 /// Specify a key function from data items of type `T` to a sort key of type `K`.
 /// Implment this trait to create a custom sort order.
-pub trait SortKey<T, K: Ord> {
-    fn sort_key(t: &T) -> K;
+pub trait SortKey<T, K: Ord + Clone> {
+    fn sort_key(t: &T) -> &K;
 }
 
 /// Marker struct for sorting types that implement `Ord` in their 'natural' order.
@@ -202,8 +202,8 @@ impl<T> SortKey<T, T> for DefaultSort
 where
     T: Ord + Clone,
 {
-    fn sort_key(t: &T) -> T {
-        t.clone()
+    fn sort_key(t: &T) -> &T {
+        t
     }
 }
 
@@ -234,7 +234,7 @@ struct ShardWriterHelper<T> {
 impl<T, K, S> ShardWriter<T, K, S>
 where
     T: 'static + Send + Serialize,
-    K: 'static + Send + Ord + Serialize,
+    K: 'static + Send + Ord + Serialize + Clone,
     S: SortKey<T, K>,
 {
     /// Create a writer for storing data items of type `T`.
@@ -437,7 +437,7 @@ struct ShardWriterThread<T, K, S> {
 impl<T, K, S> ShardWriterThread<T, K, S>
 where
     T: Send + Serialize,
-    K: Ord + Serialize,
+    K: Ord + Clone + Serialize,
     S: SortKey<T, K>,
 {
     fn new(
@@ -466,7 +466,7 @@ where
             n_items += buf.len();
 
             // Sort by sort key
-            buf.sort_by_key(S::sort_key);
+            buf.sort_by(|x, y| S::sort_key(x).cmp(S::sort_key(y)));
 
             // Write out the buffer chunks
             for c in buf.chunks(self.chunk_size) {
@@ -505,7 +505,10 @@ where
     fn write_chunk(&mut self, items: &[T]) -> Result<usize, Error> {
         self.serialize_buffer.clear();
         self.compress_buffer.clear();
-        let bounds = (S::sort_key(&items[0]), S::sort_key(&items[items.len() - 1]));
+        let bounds = (
+            S::sort_key(&items[0]).clone(), 
+            S::sort_key(&items[items.len() - 1]).clone()
+        );
 
         serialize_into(&mut self.serialize_buffer, items)?;
 
@@ -517,7 +520,7 @@ where
         }
 
         self.writer
-            .write_block(bounds, items.len(), &self.compress_buffer)
+            .write_block(bounds.clone(), items.len(), &self.compress_buffer)
     }
 
     /// Write out the shard positioning data
@@ -686,7 +689,7 @@ where
             data.extend(r.into_iter().filter(|x| range.contains(&S::sort_key(x))));
         }
 
-        data.sort_by_key(S::sort_key);
+        data.sort_by(|x, y| S::sort_key(x).cmp(S::sort_key(y)));
     }
 
     pub fn iter_range(&self, range: &Range<K>) -> ShardItemIter<T, K, S> {
@@ -712,24 +715,29 @@ where
 }
 
 struct MergeVec<T, K, S> {
-    current_key: K,
+    //current_key: &'a K,
     items: Vec<T>,
-    phantom: PhantomData<S>,
+    phantom_k: PhantomData<K>,
+    phantom_s: PhantomData<S>,
 }
 
-impl<T, K, S> MergeVec<T, K, S>
+impl<'a, T, K, S> MergeVec<T, K, S>
 where
     S: SortKey<T, K>,
-    K: Ord,
+    K: Ord + Clone,
 {
     pub fn new(items: Vec<T>) -> MergeVec<T, K, S> {
         assert!(items.len() > 0);
 
         MergeVec {
-            current_key: S::sort_key(&items[items.len() - 1]),
             items: items,
-            phantom: PhantomData,
+            phantom_k: PhantomData,
+            phantom_s: PhantomData
         }
+    }
+
+    pub fn current_key(&self) -> &K {
+        S::sort_key(&self.items[self.items.len() - 1])
     }
 
     pub fn pop(mut self) -> (T, Option<MergeVec<T, K, S>>) {
@@ -741,9 +749,9 @@ where
             (
                 item,
                 Some(MergeVec {
-                    current_key: S::sort_key(&self.items[self.items.len() - 1]),
                     items: self.items,
-                    phantom: PhantomData,
+                    phantom_k: PhantomData,
+                    phantom_s: PhantomData,
                 }),
             )
         }
@@ -752,16 +760,18 @@ where
 
 impl<T, K, S> Ord for MergeVec<T, K, S>
 where
-    K: Ord,
+    K: Ord + Clone,
+    S: SortKey<T,K>,
 {
     fn cmp(&self, other: &MergeVec<T, K, S>) -> Ordering {
-        self.current_key.cmp(&other.current_key)
+        self.current_key().cmp(other.current_key())
     }
 }
 
 impl<T, K, S> PartialOrd for MergeVec<T, K, S>
 where
-    K: Ord,
+    K: Ord + Clone,
+    S: SortKey<T, K>,
 {
     fn partial_cmp(&self, other: &MergeVec<T, K, S>) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -770,16 +780,18 @@ where
 
 impl<T, K, S> PartialEq for MergeVec<T, K, S>
 where
-    K: Ord,
+    K: Ord + Clone,
+    S: SortKey<T, K>,
 {
     fn eq(&self, other: &MergeVec<T, K, S>) -> bool {
-        self.current_key == other.current_key
+        self.current_key() == other.current_key()
     }
 }
 
 impl<T, K, S> Eq for MergeVec<T, K, S>
 where
-    K: Ord,
+    K: Ord + Clone,
+    S: SortKey<T,K>,
 {
 }
 
@@ -834,20 +846,20 @@ where
     }
 
     /// What key is next among the active set
-    fn peek_active_next(&self) -> Option<K> {
+    fn peek_active_next(&self) -> Option<&K> {
         let n = self.active_queue.peek_min();
-        n.map(|v| v.current_key.clone())
+        n.map(|v| v.current_key())
     }
 
     /// Activate any relevant
     fn activate_shards(&mut self) {
         // What key would be next?
-        let mut possible_next = self.peek_active_next();
+        //let mut possible_next = self.active_queue.peek_min().map(|v| v.current_key());
 
         // Restore all the shards that start at or before this item, or the next usable shard
         while self.waiting_queue.peek_min().map_or(false, |shard| {
-            Some(shard.start_key.clone()) <= possible_next
-        }) || (possible_next.is_none() && self.waiting_queue.len() > 0)
+            Some(&shard.start_key) <= self.peek_active_next()
+        }) || (self.peek_active_next().is_none() && self.waiting_queue.len() > 0)
         {
             let shard = self.waiting_queue.pop_min().unwrap();
             let mut items = self.reader.read_shard(shard, &mut self.buf);
@@ -855,7 +867,7 @@ where
             let vec = MergeVec::new(items);
             self.active_queue.push(vec);
 
-            possible_next = self.peek_active_next();
+            //possible_next = self.peek_active_next();
         }
     }
 
@@ -899,11 +911,64 @@ where
     }
 }
 
+struct SortableItem<T,K,S> {
+    item: T,
+    phantom_k: PhantomData<K>,
+    phantom_s: PhantomData<S>,
+}
+
+impl<T, K, S> SortableItem<T, K, S> {
+    fn new(item: T) -> SortableItem<T, K, S> {
+        SortableItem {
+            item,
+            phantom_k: PhantomData,
+            phantom_s: PhantomData,
+        }
+    }
+}
+
+impl<T,K,S> Ord for SortableItem<T, K, S>
+where
+    K: Ord + Clone,
+    S: SortKey<T,K>
+{
+    fn cmp(&self, other: &SortableItem<T,K,S>) -> Ordering {
+        S::sort_key(&self.item).cmp(S::sort_key(&other.item))
+    }
+}
+
+impl<T,K,S> PartialOrd for SortableItem<T, K, S>
+where
+    K: Ord + Clone,
+    S: SortKey<T,K>
+{
+    fn partial_cmp(&self, other: &SortableItem<T,K,S>) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T,K,S> PartialEq for SortableItem<T, K, S>
+where
+    K: Ord + Clone,
+    S: SortKey<T,K>
+{
+    fn eq(&self, other: &SortableItem<T,K,S>) -> bool {
+        S::sort_key(&self.item) == S::sort_key(&other.item)
+    }
+}
+
+impl<T,K,S> Eq for SortableItem<T, K, S>
+where
+    K: Ord + Clone,
+    S: SortKey<T,K>
+{
+}
+
+
 /// Iterator over merged shardio files
 pub struct MergeIterator<'a, T: 'a, K: 'a, S: 'a> {
     iterators: Vec<ShardItemIter<'a, T, K, S>>,
-    next_values: Vec<Option<T>>,
-    merge_heap: MinMaxHeap<(K, usize)>,
+    merge_heap: MinMaxHeap<(SortableItem<T,K,S>, usize)>,
     phantom_k: PhantomData<K>,
     phantom_s: PhantomData<S>,
 }
@@ -915,25 +980,20 @@ where
     ShardItemIter<'a, T, K, S>: Iterator<Item = T>,
 {
     fn new(mut iterators: Vec<ShardItemIter<'a, T, K, S>>) -> MergeIterator<'a, T, K, S> {
-        let mut next_values = Vec::new();
         let mut merge_heap = MinMaxHeap::new();
 
         for (idx, itr) in iterators.iter_mut().enumerate() {
             let item = itr.next();
 
             // If we have a next item, add it's key to the heap
-            item.as_ref().map(|ii| {
-                let k = S::sort_key(ii);
-                merge_heap.push((k, idx));
+            item.map(|ii| {
+                let sortable_item = SortableItem::new(ii);
+                merge_heap.push((sortable_item, idx));
             });
-
-            // Add current item of iterator to next_values
-            next_values.push(item);
         }
 
         MergeIterator {
             iterators,
-            next_values,
             merge_heap,
             phantom_k: PhantomData,
             phantom_s: PhantomData,
@@ -954,23 +1014,18 @@ where
     fn next(&mut self) -> Option<T> {
         let next_itr = self.merge_heap.pop_min();
 
-        next_itr.map(|(_, i)| {
-            assert!(self.next_values[i].is_some());
+        next_itr.map(|(item, i)| {
 
             // Get next-next value for this iterator
-            let mut next = self.iterators[i].next();
+            let next = self.iterators[i].next();
 
             // Push the next-next key onto the heap
             match next {
-                Some(ref v) => self.merge_heap.push((S::sort_key(v), i)),
+                Some(next_item) => self.merge_heap.push((SortableItem::new(next_item), i)),
                 _ => (),
             };
-
-            // Swap the value to return with the next-next value
-            std::mem::swap(&mut self.next_values[i], &mut next);
-
-            // Return. Heap should not have pointers to exhausted iterators.
-            next.unwrap()
+            
+            item.item
         })
     }
 }
@@ -1099,8 +1154,8 @@ mod shard_tests {
 
     struct FieldDSort;
     impl SortKey<T1, u8> for FieldDSort {
-        fn sort_key(item: &T1) -> u8 {
-            item.d
+        fn sort_key(item: &T1) -> &u8 {
+            &item.d
         }
     }
 
