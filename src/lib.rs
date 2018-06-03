@@ -309,8 +309,7 @@ where
         self.closed = true;
         let _ = self.helper.tx.send(None);
         self.helper.buffer_thread.take().map(|x| x.join());
-        let join_handle = self
-            .helper
+        let join_handle = self.helper
             .writer_thread
             .take()
             .expect("called finish twice");
@@ -506,8 +505,8 @@ where
         self.serialize_buffer.clear();
         self.compress_buffer.clear();
         let bounds = (
-            S::sort_key(&items[0]).clone(), 
-            S::sort_key(&items[items.len() - 1]).clone()
+            S::sort_key(&items[0]).clone(),
+            S::sort_key(&items[items.len() - 1]).clone(),
         );
 
         serialize_into(&mut self.serialize_buffer, items)?;
@@ -670,8 +669,7 @@ where
     }
 
     pub fn read_range(&self, range: &Range<K>, data: &mut Vec<T>, buf: &mut Vec<u8>) {
-        for rec in self
-            .index
+        for rec in self.index
             .iter()
             .cloned()
             .filter(|x| range.intersects_shard(x))
@@ -732,7 +730,7 @@ where
         MergeVec {
             items: items,
             phantom_k: PhantomData,
-            phantom_s: PhantomData
+            phantom_s: PhantomData,
         }
     }
 
@@ -761,7 +759,7 @@ where
 impl<T, K, S> Ord for MergeVec<T, K, S>
 where
     K: Ord + Clone,
-    S: SortKey<T,K>,
+    S: SortKey<T, K>,
 {
     fn cmp(&self, other: &MergeVec<T, K, S>) -> Ordering {
         self.current_key().cmp(other.current_key())
@@ -791,7 +789,7 @@ where
 impl<T, K, S> Eq for MergeVec<T, K, S>
 where
     K: Ord + Clone,
-    S: SortKey<T,K>,
+    S: SortKey<T, K>,
 {
 }
 
@@ -911,7 +909,7 @@ where
     }
 }
 
-struct SortableItem<T,K,S> {
+struct SortableItem<T, K, S> {
     item: T,
     phantom_k: PhantomData<K>,
     phantom_s: PhantomData<S>,
@@ -927,48 +925,47 @@ impl<T, K, S> SortableItem<T, K, S> {
     }
 }
 
-impl<T,K,S> Ord for SortableItem<T, K, S>
+impl<T, K, S> Ord for SortableItem<T, K, S>
 where
     K: Ord + Clone,
-    S: SortKey<T,K>
+    S: SortKey<T, K>,
 {
-    fn cmp(&self, other: &SortableItem<T,K,S>) -> Ordering {
+    fn cmp(&self, other: &SortableItem<T, K, S>) -> Ordering {
         S::sort_key(&self.item).cmp(S::sort_key(&other.item))
     }
 }
 
-impl<T,K,S> PartialOrd for SortableItem<T, K, S>
+impl<T, K, S> PartialOrd for SortableItem<T, K, S>
 where
     K: Ord + Clone,
-    S: SortKey<T,K>
+    S: SortKey<T, K>,
 {
-    fn partial_cmp(&self, other: &SortableItem<T,K,S>) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &SortableItem<T, K, S>) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T,K,S> PartialEq for SortableItem<T, K, S>
+impl<T, K, S> PartialEq for SortableItem<T, K, S>
 where
     K: Ord + Clone,
-    S: SortKey<T,K>
+    S: SortKey<T, K>,
 {
-    fn eq(&self, other: &SortableItem<T,K,S>) -> bool {
+    fn eq(&self, other: &SortableItem<T, K, S>) -> bool {
         S::sort_key(&self.item) == S::sort_key(&other.item)
     }
 }
 
-impl<T,K,S> Eq for SortableItem<T, K, S>
+impl<T, K, S> Eq for SortableItem<T, K, S>
 where
     K: Ord + Clone,
-    S: SortKey<T,K>
+    S: SortKey<T, K>,
 {
 }
-
 
 /// Iterator over merged shardio files
 pub struct MergeIterator<'a, T: 'a, K: 'a, S: 'a> {
     iterators: Vec<ShardItemIter<'a, T, K, S>>,
-    merge_heap: MinMaxHeap<(SortableItem<T,K,S>, usize)>,
+    merge_heap: MinMaxHeap<(SortableItem<T, K, S>, usize)>,
     phantom_k: PhantomData<K>,
     phantom_s: PhantomData<S>,
 }
@@ -1015,7 +1012,6 @@ where
         let next_itr = self.merge_heap.pop_min();
 
         next_itr.map(|(item, i)| {
-
             // Get next-next value for this iterator
             let next = self.iterators[i].next();
 
@@ -1024,7 +1020,7 @@ where
                 Some(next_item) => self.merge_heap.push((SortableItem::new(next_item), i)),
                 _ => (),
             };
-            
+
             item.item
         })
     }
