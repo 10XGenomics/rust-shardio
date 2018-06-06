@@ -142,7 +142,8 @@ fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> io::Result<usize> {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
-/// A group of `len_items` items, from shard `shard`, sorted at position `offset`, using `block_size` bytes on-disk.
+/// A group of `len_items` items, from shard `shard`, stored at position `offset`, using `block_size` bytes on-disk,
+/// with sort keys covering the interval [`start_key`, `end_key`]
 struct ShardRecord<K> {
     start_key: K,
     end_key: K,
@@ -151,13 +152,13 @@ struct ShardRecord<K> {
     len_items: usize,
 }
 
-/// Log of shard chunks written into this file.
+/// Log of shard chunks written into an output file.
 struct FileManager<K> {
     // Current start position of next chunk
     cursor: usize,
-
     // Record of chunks written
     regions: Vec<ShardRecord<K>>,
+    // File handle
     file: File,
 }
 
@@ -170,8 +171,13 @@ impl<K: Ord + Serialize> FileManager<K> {
             regions: Vec::new(),
             file,
         })
+
+        // TODO: write a magic string to the start of the file,
+        // and maybe some metadata about the types being stored and the 
+        // compression scheme.
     }
 
+    // Write a chunk to the file. Chunk contains `n_items` items covering [range.0,  range.1]. Compressed data is in `data`
     fn write_block(&mut self, range: (K, K), n_items: usize, data: &[u8]) -> Result<usize, Error> {
         let cur_offset = self.cursor;
         let reg = ShardRecord {
@@ -209,13 +215,13 @@ where
 
 /// Write a stream data items of type `T` to disk.
 ///
-/// Data is sorted, block compressed and written to disk when the buffer fills up. When the ShardWriter is dropped, it will
+/// Data is buffered up to `item_buffer_size` items, then sorted, block compressed and written to disk. When the ShardWriter is dropped, it will
 /// flush remaining items to disk, write the inded and close the file.  NOTE: you may loose data if you don't close shutdown ShardSenders
 /// prior to dropping the ShardWriter.
 ///
 /// # Sorting
 /// Items are sorted according to the `Ord` implementation of type `K`. Type `S`, implementing the `SortKey` trait
-/// maps items of type `T` to their sort key of type `K`. By default the sort key _is_ the data item itself, and the
+/// maps items of type `T` to their sort key of type `K`. By default the sort key is the data item itself, and the
 /// the `DefaultSort` implementation of `SortKey` is the identity function.
 pub struct ShardWriter<T, K = T, S = DefaultSort> {
     helper: ShardWriterHelper<T>,
@@ -713,7 +719,6 @@ where
 }
 
 struct MergeVec<T, K, S> {
-    //current_key: &'a K,
     items: Vec<T>,
     phantom_k: PhantomData<K>,
     phantom_s: PhantomData<S>,
@@ -849,12 +854,8 @@ where
         n.map(|v| v.current_key())
     }
 
-    /// Activate any relevant
+    /// Restore all the shards that start at or before this item, or the next usable shard
     fn activate_shards(&mut self) {
-        // What key would be next?
-        //let mut possible_next = self.active_queue.peek_min().map(|v| v.current_key());
-
-        // Restore all the shards that start at or before this item, or the next usable shard
         while self.waiting_queue.peek_min().map_or(false, |shard| {
             Some(&shard.start_key) <= self.peek_active_next()
         }) || (self.peek_active_next().is_none() && self.waiting_queue.len() > 0)
@@ -864,12 +865,10 @@ where
             items.reverse();
             let vec = MergeVec::new(items);
             self.active_queue.push(vec);
-
-            //possible_next = self.peek_active_next();
         }
     }
 
-    // Get the next item to return among active vecs
+    /// Get the next item to return among active chunks
     fn next_active(&mut self) -> Option<T> {
         self.active_queue.pop_min().map(|vec| {
             let (item, new_vec) = vec.pop();
