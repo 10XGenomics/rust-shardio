@@ -21,7 +21,6 @@
 //! fn main()
 //! {
 //!     let filename = "test.shardio";
-//!
 //!     {
 //!         // Open a shardio output file
 //!         // Parameters here  buffering, and the size of disk chunks
@@ -35,8 +34,7 @@
 //!
 //!         // Generate some test data
 //!         for i in 0..(2 << 16) {
-//!             let item = Test { a: (i%25) as u64, b: (i%100) as u32 };
-//!             sender.send(item);
+//!             sender.send(Test { a: (i%25) as u64, b: (i%100) as u32 });
 //!         }
 //!     }
 //!
