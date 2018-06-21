@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["Rorder",""]],"struct":[["Range","A range of points over the type `K`, spanning the half-open interval [`start`, `end`). A value of `None` indicates that the interval is unbounded in that direction."]]});

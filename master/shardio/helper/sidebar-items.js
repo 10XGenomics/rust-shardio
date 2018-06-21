@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["ThreadProxyIterator","Execute an iterator on a worker thread, which can work ahead a configurable number of items"],["ThreadProxyWriter",""]]});
