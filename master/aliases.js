@@ -41,6 +41,7 @@ ALIASES['scopeguard'] = {};
 ALIASES['serde'] = {};
 ALIASES['serde_derive'] = {};
 ALIASES['shardio'] = {};
+ALIASES['shardio'] = {};
 ALIASES['smallvec'] = {};
 ALIASES['stable_deref_trait'] = {};
 ALIASES['syn'] = {};
