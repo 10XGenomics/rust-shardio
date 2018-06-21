@@ -1173,8 +1173,8 @@ mod shard_tests {
         // Test different buffering configurations
         check_round_trip(10, 20, 0, 1 << 8);
         check_round_trip(10, 20, 40, 1 << 8);
-        check_round_trip(1024, 16, 2 << 14, 1 << 18);
-        check_round_trip(4096, 8, 2048, 1 << 18);
+        check_round_trip(1024, 16, 2 << 14, 1 << 16);
+        check_round_trip(4096, 8, 2048, 1 << 16);
         check_round_trip(128, 4, 1024, 1 << 12);
         check_round_trip(50, 2, 256, 1 << 16);
         check_round_trip(10, 20, 40, 1 << 14);
@@ -1185,21 +1185,22 @@ mod shard_tests {
         // Test different buffering configurations
         check_round_trip_sort_key(10, 20, 0, 256, true);
         check_round_trip_sort_key(10, 20, 40, 256, true);
-        check_round_trip_sort_key(1024, 16, 2 << 14, 1 << 18, true);
-        check_round_trip_sort_key(4096, 8, 2048, 1 << 18, true);
+        check_round_trip_sort_key(1024, 16, 2 << 14, 1 << 16, true);
+        check_round_trip_sort_key(4096, 8, 2048, 1 << 16, true);
         check_round_trip_sort_key(128, 4, 1024, 1 << 12, true);
         check_round_trip_sort_key(50, 2, 256, 1 << 16, true);
         check_round_trip_sort_key(10, 20, 40, 1 << 14, true);
 
-        check_round_trip_sort_key(64, 16, 1 << 17, 1 << 18, true);
-        check_round_trip_sort_key(128, 16, 1 << 17, 1 << 18, true);
-        check_round_trip_sort_key(64, 16, 1 << 16, 1 << 18, true);
-        check_round_trip_sort_key(128, 16, 1 << 16, 1 << 18, true);
-        check_round_trip_sort_key(64, 16, 1 << 15, 1 << 18, true);
-        check_round_trip_sort_key(128, 16, 1 << 15, 1 << 18, true);
+        check_round_trip_sort_key(64, 16, 1 << 17, 1 << 16, true);
+        check_round_trip_sort_key(128, 16, 1 << 17, 1 << 16, true);
+        check_round_trip_sort_key(64, 16, 1 << 16, 1 << 16, true);
+        check_round_trip_sort_key(128, 16, 1 << 16, 1 << 16, true);
+        check_round_trip_sort_key(64, 16, 1 << 15, 1 << 16, true);
+        check_round_trip_sort_key(128, 16, 1 << 15, 1 << 16, true);
     }
 
-    #[test]
+    // Only run this test in release mode for perf testing
+    //#[test]
     fn test_shard_round_trip_big() {
         // Play with these settings to test perf.
         check_round_trip_opt(1024, 64, 1 << 18, 1 << 20, false);
