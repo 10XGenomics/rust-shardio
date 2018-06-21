@@ -1,5 +1,7 @@
 # rust-shardio
 
-Library for streaming items to an on-disk store. Items have a customizable bucket key. Items are buffered into chunks, then serialized with serde + lz4 and written to file containing data chunks, and an index of the position and bucket of each chunk. 
+Library for handling out-of-memory sorting of large datasets which need to be processed in multiple passes map / sort / reduce passes. 
 
-Useful for implementing out-of-memory bucket sorting or map-reduce style computations.
+Items of an arbitrary type T implementing Serialize and Deserialize are buffered, sorted according to a customizable sort key, then serialized in chunks with serde + lz4 and written to disk, while maintaing an index and an index of the position and key range of each chunk. 
+
+See [Docs](https://10xgenomics.github.io/rust-shardio) for API and examples.

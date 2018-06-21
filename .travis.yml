@@ -27,4 +27,3 @@ script:
 after_success:
 # upload documentation to github.io (gh-pages branch)
   - cargo doc-upload
-
