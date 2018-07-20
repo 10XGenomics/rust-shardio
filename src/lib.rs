@@ -112,31 +112,70 @@ pub use range::Range;
 fn err(e: ssize_t) -> io::Result<usize> {
     if e == -1 as ssize_t {
         Err(io::Error::last_os_error())
+    } else if e < 0 as ssize_t {
+        Err(io::Error::from(io::ErrorKind::InvalidData))
     } else {
         Ok(e as usize)
     }
 }
 
 fn read_at(fd: &RawFd, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
-    err(unsafe {
-        pread(
-            *fd,
-            buf.as_mut_ptr() as *mut c_void,
-            buf.len() as size_t,
-            pos as off_t,
-        )
-    })
+    let mut total = 0usize;
+    let mut tries = 0usize;
+
+    while total < buf.len() && tries < 16 {
+        let bytes =
+            try!(
+                err(unsafe {
+                    pread(
+                        *fd,
+                        buf.as_mut_ptr().offset(total as isize) as *mut c_void,
+                        (buf.len() - total) as size_t,
+                        (pos + total as u64) as off_t,
+                )
+            }));
+
+        total += bytes;
+        if bytes == 0 {
+            tries += 1;
+        }
+    }
+
+    if total < buf.len() {
+        Err(io::Error::from(io::ErrorKind::TimedOut))
+    } else {
+        Ok(total)
+    }
 }
 
 fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> io::Result<usize> {
-    err(unsafe {
-        pwrite(
-            *fd,
-            buf.as_ptr() as *const c_void,
-            buf.len() as size_t,
-            pos as off_t,
-        )
-    })
+    let mut total = 0usize;
+    let mut tries = 0usize;
+
+    while total < buf.len() && tries < 16 {
+        let bytes =
+            try!(
+                err(unsafe {
+                    pwrite(
+                        *fd,
+                        buf.as_ptr().offset(total as isize) as *const c_void,
+                        (buf.len() - total) as size_t,
+                        (pos + total as u64) as off_t,
+                    )
+               })
+            );
+
+        total += bytes;
+        if bytes == 0 {
+            tries += 1;
+        }
+    }
+
+    if total < buf.len() {
+        Err(io::Error::from(io::ErrorKind::TimedOut))
+    } else {
+        Ok(total)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1169,18 +1208,28 @@ mod shard_tests {
     }
 
     #[test]
-    fn test_write_at() {
-        //let tmp = tempfile::NamedTempFile::new().unwrap();
+    fn test_read_write_at() {
         let tmp = tempfile::tempfile().unwrap();
 
-        let N = (1 << 31) - 1000;
+        let n = (1 << 31) - 1000;
         let mut buf = Vec::with_capacity(N);
-        for i in 0 .. N {
+        for i in 0 .. n {
             buf.push((i % 254) as u8);
         }
 
         let written = write_at(&tmp.as_raw_fd(), 0, &buf).unwrap();
         assert_eq!(N, written);
+
+        for i in 0 .. n {
+            buf[i] = 0;
+        }
+
+        let read = read_at(&tmp.as_raw_fd(), 0, &mut buf).unwrap();
+        assert_eq!(n, read);
+
+        for i in 0 .. n {
+            assert_eq!(buf[i], (i % 254) as u8)
+        }
     }
 
     #[test]
