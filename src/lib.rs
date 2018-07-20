@@ -1212,13 +1212,13 @@ mod shard_tests {
         let tmp = tempfile::tempfile().unwrap();
 
         let n = (1 << 31) - 1000;
-        let mut buf = Vec::with_capacity(N);
+        let mut buf = Vec::with_capacity(n);
         for i in 0 .. n {
             buf.push((i % 254) as u8);
         }
 
         let written = write_at(&tmp.as_raw_fd(), 0, &buf).unwrap();
-        assert_eq!(N, written);
+        assert_eq!(n, written);
 
         for i in 0 .. n {
             buf[i] = 0;
