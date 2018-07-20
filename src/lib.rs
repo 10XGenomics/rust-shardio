@@ -1207,18 +1207,21 @@ mod shard_tests {
         items
     }
 
+    // Some tests are configured to only run with the "full-test" feature enabled.
+    // They are too slow to run in debug mode, so you should use release mode.
+    #[cfg(feature = "full-test")]
     #[test]
     fn test_read_write_at() {
         let tmp = tempfile::tempfile().unwrap();
 
         let n = (1 << 31) - 1000;
-        let mut buf = Vec::with_capacity(N);
+        let mut buf = Vec::with_capacity(n);
         for i in 0 .. n {
             buf.push((i % 254) as u8);
         }
 
         let written = write_at(&tmp.as_raw_fd(), 0, &buf).unwrap();
-        assert_eq!(N, written);
+        assert_eq!(n, written);
 
         for i in 0 .. n {
             buf[i] = 0;
@@ -1244,6 +1247,7 @@ mod shard_tests {
         check_round_trip(10, 20, 40, 1 << 14);
     }
 
+    #[cfg(feature = "full-test")]
     #[test]
     fn test_shard_round_trip_big_chunks() {
         // Test different buffering configurations
@@ -1261,16 +1265,14 @@ mod shard_tests {
         check_round_trip_sort_key(50, 2, 256, 1 << 16, true);
         check_round_trip_sort_key(10, 20, 40, 1 << 14, true);
 
-        check_round_trip_sort_key(64, 16, 1 << 17, 1 << 16, true);
-        check_round_trip_sort_key(128, 16, 1 << 17, 1 << 16, true);
-        check_round_trip_sort_key(64, 16, 1 << 16, 1 << 16, true);
+        check_round_trip_sort_key(64, 16, 1 << 17, 1 << 16, true);  
         check_round_trip_sort_key(128, 16, 1 << 16, 1 << 16, true);
-        check_round_trip_sort_key(64, 16, 1 << 15, 1 << 16, true);
         check_round_trip_sort_key(128, 16, 1 << 15, 1 << 16, true);
     }
 
     // Only run this test in release mode for perf testing
-    //#[test]
+    #[cfg(feature = "full-test")]
+    #[test]
     fn test_shard_round_trip_big() {
         // Play with these settings to test perf.
         check_round_trip_opt(1024, 64, 1 << 18, 1 << 20, false);
