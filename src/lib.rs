@@ -1169,6 +1169,21 @@ mod shard_tests {
     }
 
     #[test]
+    fn test_write_at() {
+        //let tmp = tempfile::NamedTempFile::new().unwrap();
+        let tmp = tempfile::tempfile().unwrap();
+
+        let N = (1 << 31) - 1000;
+        let mut buf = Vec::with_capacity(N);
+        for i in 0 .. N {
+            buf.push((i % 254) as u8);
+        }
+
+        let written = write_at(&tmp.as_raw_fd(), 0, &buf).unwrap();
+        assert_eq!(N, written);
+    }
+
+    #[test]
     fn test_shard_round_trip() {
         // Test different buffering configurations
         check_round_trip(10, 20, 0, 1 << 8);
@@ -1178,6 +1193,12 @@ mod shard_tests {
         check_round_trip(128, 4, 1024, 1 << 12);
         check_round_trip(50, 2, 256, 1 << 16);
         check_round_trip(10, 20, 40, 1 << 14);
+    }
+
+    #[test]
+    fn test_shard_round_trip_big_chunks() {
+        // Test different buffering configurations
+        check_round_trip(1<<18, 64, 1<<20, 1 << 21);
     }
 
     #[test]
