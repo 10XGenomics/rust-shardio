@@ -109,7 +109,7 @@ pub mod helper;
 
 pub use range::Range;
 
-fn err(e: ssize_t) -> io::Result<usize> {
+fn catch_err(e: ssize_t) -> io::Result<usize> {
     if e == -1 as ssize_t {
         Err(io::Error::last_os_error())
     } else if e < 0 as ssize_t {
@@ -121,12 +121,11 @@ fn err(e: ssize_t) -> io::Result<usize> {
 
 fn read_at(fd: &RawFd, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
     let mut total = 0usize;
-    let mut tries = 0usize;
 
-    while total < buf.len() && tries < 16 {
+    while total < buf.len() {
         let bytes =
             try!(
-                err(unsafe {
+                catch_err(unsafe {
                     pread(
                         *fd,
                         buf.as_mut_ptr().offset(total as isize) as *mut c_void,
@@ -135,27 +134,23 @@ fn read_at(fd: &RawFd, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
                 )
             }));
 
-        total += bytes;
         if bytes == 0 {
-            tries += 1;
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof))
         }
+
+        total += bytes;
     }
 
-    if total < buf.len() {
-        Err(io::Error::from(io::ErrorKind::TimedOut))
-    } else {
-        Ok(total)
-    }
+    Ok(total)
 }
 
 fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> io::Result<usize> {
     let mut total = 0usize;
-    let mut tries = 0usize;
 
-    while total < buf.len() && tries < 16 {
+    while total < buf.len() {
         let bytes =
             try!(
-                err(unsafe {
+                catch_err(unsafe {
                     pwrite(
                         *fd,
                         buf.as_ptr().offset(total as isize) as *const c_void,
@@ -165,17 +160,14 @@ fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> io::Result<usize> {
                })
             );
 
-        total += bytes;
         if bytes == 0 {
-            tries += 1;
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof))
         }
+
+        total += bytes;
     }
 
-    if total < buf.len() {
-        Err(io::Error::from(io::ErrorKind::TimedOut))
-    } else {
-        Ok(total)
-    }
+    Ok(total)
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
