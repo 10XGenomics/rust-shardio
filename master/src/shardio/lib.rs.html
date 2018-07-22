@@ -1364,6 +1364,70 @@
 <span id="1364">1364</span>
 <span id="1365">1365</span>
 <span id="1366">1366</span>
+<span id="1367">1367</span>
+<span id="1368">1368</span>
+<span id="1369">1369</span>
+<span id="1370">1370</span>
+<span id="1371">1371</span>
+<span id="1372">1372</span>
+<span id="1373">1373</span>
+<span id="1374">1374</span>
+<span id="1375">1375</span>
+<span id="1376">1376</span>
+<span id="1377">1377</span>
+<span id="1378">1378</span>
+<span id="1379">1379</span>
+<span id="1380">1380</span>
+<span id="1381">1381</span>
+<span id="1382">1382</span>
+<span id="1383">1383</span>
+<span id="1384">1384</span>
+<span id="1385">1385</span>
+<span id="1386">1386</span>
+<span id="1387">1387</span>
+<span id="1388">1388</span>
+<span id="1389">1389</span>
+<span id="1390">1390</span>
+<span id="1391">1391</span>
+<span id="1392">1392</span>
+<span id="1393">1393</span>
+<span id="1394">1394</span>
+<span id="1395">1395</span>
+<span id="1396">1396</span>
+<span id="1397">1397</span>
+<span id="1398">1398</span>
+<span id="1399">1399</span>
+<span id="1400">1400</span>
+<span id="1401">1401</span>
+<span id="1402">1402</span>
+<span id="1403">1403</span>
+<span id="1404">1404</span>
+<span id="1405">1405</span>
+<span id="1406">1406</span>
+<span id="1407">1407</span>
+<span id="1408">1408</span>
+<span id="1409">1409</span>
+<span id="1410">1410</span>
+<span id="1411">1411</span>
+<span id="1412">1412</span>
+<span id="1413">1413</span>
+<span id="1414">1414</span>
+<span id="1415">1415</span>
+<span id="1416">1416</span>
+<span id="1417">1417</span>
+<span id="1418">1418</span>
+<span id="1419">1419</span>
+<span id="1420">1420</span>
+<span id="1421">1421</span>
+<span id="1422">1422</span>
+<span id="1423">1423</span>
+<span id="1424">1424</span>
+<span id="1425">1425</span>
+<span id="1426">1426</span>
+<span id="1427">1427</span>
+<span id="1428">1428</span>
+<span id="1429">1429</span>
+<span id="1430">1430</span>
 </pre><pre class="rust ">
 <span class="comment">// Copyright (c) 2018 10x Genomics, Inc. All rights reserved.</span>
 
@@ -1476,34 +1540,65 @@
 
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">range</span>::<span class="ident">Range</span>;
 
-<span class="kw">fn</span> <span class="ident">err</span>(<span class="ident">e</span>: <span class="ident">ssize_t</span>) <span class="op">-&gt;</span> <span class="ident">io</span>::<span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
+<span class="kw">fn</span> <span class="ident">catch_err</span>(<span class="ident">e</span>: <span class="ident">ssize_t</span>) <span class="op">-&gt;</span> <span class="ident">io</span>::<span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
     <span class="kw">if</span> <span class="ident">e</span> <span class="op">==</span> <span class="op">-</span><span class="number">1</span> <span class="kw">as</span> <span class="ident">ssize_t</span> {
         <span class="prelude-val">Err</span>(<span class="ident">io</span>::<span class="ident">Error</span>::<span class="ident">last_os_error</span>())
+    } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">e</span> <span class="op">&lt;</span> <span class="number">0</span> <span class="kw">as</span> <span class="ident">ssize_t</span> {
+        <span class="prelude-val">Err</span>(<span class="ident">io</span>::<span class="ident">Error</span>::<span class="ident">from</span>(<span class="ident">io</span>::<span class="ident">ErrorKind</span>::<span class="ident">InvalidData</span>))
     } <span class="kw">else</span> {
         <span class="prelude-val">Ok</span>(<span class="ident">e</span> <span class="kw">as</span> <span class="ident">usize</span>)
     }
 }
 
 <span class="kw">fn</span> <span class="ident">read_at</span>(<span class="ident">fd</span>: <span class="kw-2">&amp;</span><span class="ident">RawFd</span>, <span class="ident">pos</span>: <span class="ident">u64</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> [<span class="ident">u8</span>]) <span class="op">-&gt;</span> <span class="ident">io</span>::<span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-    <span class="ident">err</span>(<span class="kw">unsafe</span> {
-        <span class="ident">pread</span>(
-            <span class="kw-2">*</span><span class="ident">fd</span>,
-            <span class="ident">buf</span>.<span class="ident">as_mut_ptr</span>() <span class="kw">as</span> <span class="kw-2">*</span><span class="kw-2">mut</span> <span class="ident">c_void</span>,
-            <span class="ident">buf</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">size_t</span>,
-            <span class="ident">pos</span> <span class="kw">as</span> <span class="ident">off_t</span>,
-        )
-    })
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">total</span> <span class="op">=</span> <span class="number">0usize</span>;
+
+    <span class="kw">while</span> <span class="ident">total</span> <span class="op">&lt;</span> <span class="ident">buf</span>.<span class="ident">len</span>() {
+        <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span>
+            <span class="macro">try</span><span class="macro">!</span>(
+                <span class="ident">catch_err</span>(<span class="kw">unsafe</span> {
+                    <span class="ident">pread</span>(
+                        <span class="kw-2">*</span><span class="ident">fd</span>,
+                        <span class="ident">buf</span>.<span class="ident">as_mut_ptr</span>().<span class="ident">offset</span>(<span class="ident">total</span> <span class="kw">as</span> <span class="ident">isize</span>) <span class="kw">as</span> <span class="kw-2">*</span><span class="kw-2">mut</span> <span class="ident">c_void</span>,
+                        (<span class="ident">buf</span>.<span class="ident">len</span>() <span class="op">-</span> <span class="ident">total</span>) <span class="kw">as</span> <span class="ident">size_t</span>,
+                        (<span class="ident">pos</span> <span class="op">+</span> <span class="ident">total</span> <span class="kw">as</span> <span class="ident">u64</span>) <span class="kw">as</span> <span class="ident">off_t</span>,
+                )
+            }));
+
+        <span class="kw">if</span> <span class="ident">bytes</span> <span class="op">==</span> <span class="number">0</span> {
+            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">io</span>::<span class="ident">Error</span>::<span class="ident">from</span>(<span class="ident">io</span>::<span class="ident">ErrorKind</span>::<span class="ident">UnexpectedEof</span>))
+        }
+
+        <span class="ident">total</span> <span class="op">+=</span> <span class="ident">bytes</span>;
+    }
+
+    <span class="prelude-val">Ok</span>(<span class="ident">total</span>)
 }
 
 <span class="kw">fn</span> <span class="ident">write_at</span>(<span class="ident">fd</span>: <span class="kw-2">&amp;</span><span class="ident">RawFd</span>, <span class="ident">pos</span>: <span class="ident">u64</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-&gt;</span> <span class="ident">io</span>::<span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-    <span class="ident">err</span>(<span class="kw">unsafe</span> {
-        <span class="ident">pwrite</span>(
-            <span class="kw-2">*</span><span class="ident">fd</span>,
-            <span class="ident">buf</span>.<span class="ident">as_ptr</span>() <span class="kw">as</span> <span class="kw-2">*</span><span class="kw">const</span> <span class="ident">c_void</span>,
-            <span class="ident">buf</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">size_t</span>,
-            <span class="ident">pos</span> <span class="kw">as</span> <span class="ident">off_t</span>,
-        )
-    })
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">total</span> <span class="op">=</span> <span class="number">0usize</span>;
+
+    <span class="kw">while</span> <span class="ident">total</span> <span class="op">&lt;</span> <span class="ident">buf</span>.<span class="ident">len</span>() {
+        <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span>
+            <span class="macro">try</span><span class="macro">!</span>(
+                <span class="ident">catch_err</span>(<span class="kw">unsafe</span> {
+                    <span class="ident">pwrite</span>(
+                        <span class="kw-2">*</span><span class="ident">fd</span>,
+                        <span class="ident">buf</span>.<span class="ident">as_ptr</span>().<span class="ident">offset</span>(<span class="ident">total</span> <span class="kw">as</span> <span class="ident">isize</span>) <span class="kw">as</span> <span class="kw-2">*</span><span class="kw">const</span> <span class="ident">c_void</span>,
+                        (<span class="ident">buf</span>.<span class="ident">len</span>() <span class="op">-</span> <span class="ident">total</span>) <span class="kw">as</span> <span class="ident">size_t</span>,
+                        (<span class="ident">pos</span> <span class="op">+</span> <span class="ident">total</span> <span class="kw">as</span> <span class="ident">u64</span>) <span class="kw">as</span> <span class="ident">off_t</span>,
+                    )
+               })
+            );
+
+        <span class="kw">if</span> <span class="ident">bytes</span> <span class="op">==</span> <span class="number">0</span> {
+            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">io</span>::<span class="ident">Error</span>::<span class="ident">from</span>(<span class="ident">io</span>::<span class="ident">ErrorKind</span>::<span class="ident">UnexpectedEof</span>))
+        }
+
+        <span class="ident">total</span> <span class="op">+=</span> <span class="ident">bytes</span>;
+    }
+
+    <span class="prelude-val">Ok</span>(<span class="ident">total</span>)
 }
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Serialize</span>, <span class="ident">Deserialize</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">PartialOrd</span>, <span class="ident">Ord</span>)]</span>
@@ -2535,6 +2630,34 @@
         <span class="ident">items</span>
     }
 
+    <span class="comment">// Some tests are configured to only run with the &quot;full-test&quot; feature enabled.</span>
+    <span class="comment">// They are too slow to run in debug mode, so you should use release mode.</span>
+    <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;full-test&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">test</span>]</span>
+    <span class="kw">fn</span> <span class="ident">test_read_write_at</span>() {
+        <span class="kw">let</span> <span class="ident">tmp</span> <span class="op">=</span> <span class="ident">tempfile</span>::<span class="ident">tempfile</span>().<span class="ident">unwrap</span>();
+
+        <span class="kw">let</span> <span class="ident">n</span> <span class="op">=</span> (<span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">31</span>) <span class="op">-</span> <span class="number">1000</span>;
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buf</span> <span class="op">=</span> <span class="ident">Vec</span>::<span class="ident">with_capacity</span>(<span class="ident">n</span>);
+        <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">0</span> .. <span class="ident">n</span> {
+            <span class="ident">buf</span>.<span class="ident">push</span>((<span class="ident">i</span> <span class="op">%</span> <span class="number">254</span>) <span class="kw">as</span> <span class="ident">u8</span>);
+        }
+
+        <span class="kw">let</span> <span class="ident">written</span> <span class="op">=</span> <span class="ident">write_at</span>(<span class="kw-2">&amp;</span><span class="ident">tmp</span>.<span class="ident">as_raw_fd</span>(), <span class="number">0</span>, <span class="kw-2">&amp;</span><span class="ident">buf</span>).<span class="ident">unwrap</span>();
+        <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">n</span>, <span class="ident">written</span>);
+
+        <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">0</span> .. <span class="ident">n</span> {
+            <span class="ident">buf</span>[<span class="ident">i</span>] <span class="op">=</span> <span class="number">0</span>;
+        }
+
+        <span class="kw">let</span> <span class="ident">read</span> <span class="op">=</span> <span class="ident">read_at</span>(<span class="kw-2">&amp;</span><span class="ident">tmp</span>.<span class="ident">as_raw_fd</span>(), <span class="number">0</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">buf</span>).<span class="ident">unwrap</span>();
+        <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">n</span>, <span class="ident">read</span>);
+
+        <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">0</span> .. <span class="ident">n</span> {
+            <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">buf</span>[<span class="ident">i</span>], (<span class="ident">i</span> <span class="op">%</span> <span class="number">254</span>) <span class="kw">as</span> <span class="ident">u8</span>)
+        }
+    }
+
     <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">test_shard_round_trip</span>() {
         <span class="comment">// Test different buffering configurations</span>
@@ -2545,6 +2668,13 @@
         <span class="ident">check_round_trip</span>(<span class="number">128</span>, <span class="number">4</span>, <span class="number">1024</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">12</span>);
         <span class="ident">check_round_trip</span>(<span class="number">50</span>, <span class="number">2</span>, <span class="number">256</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>);
         <span class="ident">check_round_trip</span>(<span class="number">10</span>, <span class="number">20</span>, <span class="number">40</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">14</span>);
+    }
+
+    <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;full-test&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">test</span>]</span>
+    <span class="kw">fn</span> <span class="ident">test_shard_round_trip_big_chunks</span>() {
+        <span class="comment">// Test different buffering configurations</span>
+        <span class="ident">check_round_trip</span>(<span class="number">1</span><span class="op">&lt;&lt;</span><span class="number">18</span>, <span class="number">64</span>, <span class="number">1</span><span class="op">&lt;&lt;</span><span class="number">20</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">21</span>);
     }
 
     <span class="attribute">#[<span class="ident">test</span>]</span>
@@ -2558,16 +2688,14 @@
         <span class="ident">check_round_trip_sort_key</span>(<span class="number">50</span>, <span class="number">2</span>, <span class="number">256</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>, <span class="bool-val">true</span>);
         <span class="ident">check_round_trip_sort_key</span>(<span class="number">10</span>, <span class="number">20</span>, <span class="number">40</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">14</span>, <span class="bool-val">true</span>);
 
-        <span class="ident">check_round_trip_sort_key</span>(<span class="number">64</span>, <span class="number">16</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">17</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>, <span class="bool-val">true</span>);
-        <span class="ident">check_round_trip_sort_key</span>(<span class="number">128</span>, <span class="number">16</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">17</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>, <span class="bool-val">true</span>);
-        <span class="ident">check_round_trip_sort_key</span>(<span class="number">64</span>, <span class="number">16</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>, <span class="bool-val">true</span>);
+        <span class="ident">check_round_trip_sort_key</span>(<span class="number">64</span>, <span class="number">16</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">17</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>, <span class="bool-val">true</span>);  
         <span class="ident">check_round_trip_sort_key</span>(<span class="number">128</span>, <span class="number">16</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>, <span class="bool-val">true</span>);
-        <span class="ident">check_round_trip_sort_key</span>(<span class="number">64</span>, <span class="number">16</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">15</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>, <span class="bool-val">true</span>);
         <span class="ident">check_round_trip_sort_key</span>(<span class="number">128</span>, <span class="number">16</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">15</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>, <span class="bool-val">true</span>);
     }
 
     <span class="comment">// Only run this test in release mode for perf testing</span>
-    <span class="comment">//#[test]</span>
+    <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;full-test&quot;</span>)]</span>
+    <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">test_shard_round_trip_big</span>() {
         <span class="comment">// Play with these settings to test perf.</span>
         <span class="ident">check_round_trip_opt</span>(<span class="number">1024</span>, <span class="number">64</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">18</span>, <span class="number">1</span> <span class="op">&lt;&lt;</span> <span class="number">20</span>, <span class="bool-val">false</span>);
