@@ -5,6 +5,9 @@ authors = ["Patrick Marks <patrick@10xgenomics.com>"]
 
 [features]
 default = ['lz4']
+# Switch on the 'full-test' feature (in release mode), to enable 
+# some long-running stress-tests
+full-test = []
 
 [dependencies]
 serde = "*"

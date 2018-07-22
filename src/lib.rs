@@ -109,34 +109,65 @@ pub mod helper;
 
 pub use range::Range;
 
-fn err(e: ssize_t) -> io::Result<usize> {
+fn catch_err(e: ssize_t) -> io::Result<usize> {
     if e == -1 as ssize_t {
         Err(io::Error::last_os_error())
+    } else if e < 0 as ssize_t {
+        Err(io::Error::from(io::ErrorKind::InvalidData))
     } else {
         Ok(e as usize)
     }
 }
 
 fn read_at(fd: &RawFd, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
-    err(unsafe {
-        pread(
-            *fd,
-            buf.as_mut_ptr() as *mut c_void,
-            buf.len() as size_t,
-            pos as off_t,
-        )
-    })
+    let mut total = 0usize;
+
+    while total < buf.len() {
+        let bytes =
+            try!(
+                catch_err(unsafe {
+                    pread(
+                        *fd,
+                        buf.as_mut_ptr().offset(total as isize) as *mut c_void,
+                        (buf.len() - total) as size_t,
+                        (pos + total as u64) as off_t,
+                )
+            }));
+
+        if bytes == 0 {
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof))
+        }
+
+        total += bytes;
+    }
+
+    Ok(total)
 }
 
 fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> io::Result<usize> {
-    err(unsafe {
-        pwrite(
-            *fd,
-            buf.as_ptr() as *const c_void,
-            buf.len() as size_t,
-            pos as off_t,
-        )
-    })
+    let mut total = 0usize;
+
+    while total < buf.len() {
+        let bytes =
+            try!(
+                catch_err(unsafe {
+                    pwrite(
+                        *fd,
+                        buf.as_ptr().offset(total as isize) as *const c_void,
+                        (buf.len() - total) as size_t,
+                        (pos + total as u64) as off_t,
+                    )
+               })
+            );
+
+        if bytes == 0 {
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof))
+        }
+
+        total += bytes;
+    }
+
+    Ok(total)
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1168,6 +1199,34 @@ mod shard_tests {
         items
     }
 
+    // Some tests are configured to only run with the "full-test" feature enabled.
+    // They are too slow to run in debug mode, so you should use release mode.
+    #[cfg(feature = "full-test")]
+    #[test]
+    fn test_read_write_at() {
+        let tmp = tempfile::tempfile().unwrap();
+
+        let n = (1 << 31) - 1000;
+        let mut buf = Vec::with_capacity(n);
+        for i in 0 .. n {
+            buf.push((i % 254) as u8);
+        }
+
+        let written = write_at(&tmp.as_raw_fd(), 0, &buf).unwrap();
+        assert_eq!(n, written);
+
+        for i in 0 .. n {
+            buf[i] = 0;
+        }
+
+        let read = read_at(&tmp.as_raw_fd(), 0, &mut buf).unwrap();
+        assert_eq!(n, read);
+
+        for i in 0 .. n {
+            assert_eq!(buf[i], (i % 254) as u8)
+        }
+    }
+
     #[test]
     fn test_shard_round_trip() {
         // Test different buffering configurations
@@ -1178,6 +1237,13 @@ mod shard_tests {
         check_round_trip(128, 4, 1024, 1 << 12);
         check_round_trip(50, 2, 256, 1 << 16);
         check_round_trip(10, 20, 40, 1 << 14);
+    }
+
+    #[cfg(feature = "full-test")]
+    #[test]
+    fn test_shard_round_trip_big_chunks() {
+        // Test different buffering configurations
+        check_round_trip(1<<18, 64, 1<<20, 1 << 21);
     }
 
     #[test]
@@ -1191,16 +1257,14 @@ mod shard_tests {
         check_round_trip_sort_key(50, 2, 256, 1 << 16, true);
         check_round_trip_sort_key(10, 20, 40, 1 << 14, true);
 
-        check_round_trip_sort_key(64, 16, 1 << 17, 1 << 16, true);
-        check_round_trip_sort_key(128, 16, 1 << 17, 1 << 16, true);
-        check_round_trip_sort_key(64, 16, 1 << 16, 1 << 16, true);
+        check_round_trip_sort_key(64, 16, 1 << 17, 1 << 16, true);  
         check_round_trip_sort_key(128, 16, 1 << 16, 1 << 16, true);
-        check_round_trip_sort_key(64, 16, 1 << 15, 1 << 16, true);
         check_round_trip_sort_key(128, 16, 1 << 15, 1 << 16, true);
     }
 
     // Only run this test in release mode for perf testing
-    //#[test]
+    #[cfg(feature = "full-test")]
+    #[test]
     fn test_shard_round_trip_big() {
         // Play with these settings to test perf.
         check_round_trip_opt(1024, 64, 1 << 18, 1 << 20, false);
