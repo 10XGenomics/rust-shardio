@@ -1428,6 +1428,13 @@
 <span id="1428">1428</span>
 <span id="1429">1429</span>
 <span id="1430">1430</span>
+<span id="1431">1431</span>
+<span id="1432">1432</span>
+<span id="1433">1433</span>
+<span id="1434">1434</span>
+<span id="1435">1435</span>
+<span id="1436">1436</span>
+<span id="1437">1437</span>
 </pre><pre class="rust ">
 <span class="comment">// Copyright (c) 2018 10x Genomics, Inc. All rights reserved.</span>
 
@@ -2562,12 +2569,18 @@
         <span class="comment">// Divide the known start locations into chunks, and</span>
         <span class="comment">// use setup start positions.</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">chunk_starts</span> <span class="op">=</span> <span class="ident">Vec</span>::<span class="ident">new</span>();
-        <span class="kw">let</span> <span class="ident">chunks</span> <span class="op">=</span> <span class="ident">starts</span>.<span class="ident">chunks</span>(<span class="ident">std</span>::<span class="ident">cmp</span>::<span class="ident">max</span>(<span class="number">1</span>, <span class="ident">starts</span>.<span class="ident">len</span>() <span class="op">/</span> <span class="ident">num_chunks</span>));
-        <span class="kw">for</span> (<span class="ident">i</span>, <span class="ident">c</span>) <span class="kw">in</span> <span class="ident">chunks</span>.<span class="ident">enumerate</span>() {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">acc</span> <span class="op">=</span> <span class="number">0.0</span>;
+        <span class="kw">let</span> <span class="ident">interval</span> <span class="op">=</span> (<span class="ident">starts</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">f64</span> <span class="op">/</span> <span class="ident">num_chunks</span> <span class="kw">as</span> <span class="ident">f64</span>).<span class="ident">max</span>(<span class="number">1.0</span>);
+        <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">num_chunks</span> {
             <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">i</span> <span class="op">==</span> <span class="number">0</span> {
                 <span class="ident">range</span>.<span class="ident">start</span>.<span class="ident">clone</span>()
             } <span class="kw">else</span> {
-                <span class="prelude-val">Some</span>(<span class="ident">c</span>[<span class="number">0</span>].<span class="ident">clone</span>())
+                <span class="ident">acc</span> <span class="op">+=</span> <span class="ident">interval</span>;
+                <span class="kw">let</span> <span class="ident">idx</span> <span class="op">=</span> <span class="ident">acc</span>.<span class="ident">round</span>() <span class="kw">as</span> <span class="ident">usize</span>;
+                <span class="kw">if</span> <span class="ident">idx</span> <span class="op">&gt;=</span> <span class="ident">starts</span>.<span class="ident">len</span>() {
+                    <span class="kw">break</span>;
+                }
+                <span class="prelude-val">Some</span>(<span class="ident">starts</span>[<span class="ident">idx</span>].<span class="ident">clone</span>())
             };
             <span class="ident">chunk_starts</span>.<span class="ident">push</span>(<span class="ident">start</span>);
         }
@@ -2833,6 +2846,7 @@
             <span class="kw">for</span> <span class="ident">rc</span> <span class="kw">in</span> <span class="kw-2">&amp;</span>[<span class="number">1</span>, <span class="number">4</span>, <span class="number">7</span>, <span class="number">12</span>, <span class="number">15</span>, <span class="number">21</span>, <span class="number">65</span>] {
                 <span class="ident">all_items_chunks</span>.<span class="ident">clear</span>();
                 <span class="kw">let</span> <span class="ident">chunks</span> <span class="op">=</span> <span class="ident">set_reader</span>.<span class="ident">make_chunks</span>(<span class="kw-2">*</span><span class="ident">rc</span>, <span class="kw-2">&amp;</span><span class="ident">Range</span>::<span class="ident">all</span>());
+                <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">chunks</span>.<span class="ident">len</span>() <span class="op">&lt;=</span> <span class="kw-2">*</span><span class="ident">rc</span>, <span class="string">&quot;chunks &gt; req: ({} &gt; {})&quot;</span>, <span class="ident">chunks</span>.<span class="ident">len</span>(), <span class="kw-2">*</span><span class="ident">rc</span>);
                 <span class="kw">for</span> <span class="ident">c</span> <span class="kw">in</span> <span class="ident">chunks</span> {
                     <span class="kw">let</span> <span class="ident">itr</span> <span class="op">=</span> <span class="ident">set_reader</span>.<span class="ident">iter_range</span>(<span class="kw-2">&amp;</span><span class="ident">c</span>);
                     <span class="ident">all_items_chunks</span>.<span class="ident">extend</span>(<span class="ident">itr</span>);

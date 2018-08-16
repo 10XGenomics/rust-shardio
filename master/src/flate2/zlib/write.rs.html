@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `/home/travis/.cargo/registry/src/github.com-1ecc6299db9ec823/flate2-1.0.1/src/zlib/write.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>write.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css"><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script src="../../../storage.js"></script></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../../../settings.html"><img src="../../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `/home/travis/.cargo/registry/src/github.com-1ecc6299db9ec823/flate2-1.0.2/src/zlib/write.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>write.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../dark.css"><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script src="../../../storage.js"></script></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../../../settings.html"><img src="../../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
 <span id="4">  4</span>
@@ -346,9 +346,6 @@
 <span id="346">346</span>
 <span id="347">347</span>
 <span id="348">348</span>
-<span id="349">349</span>
-<span id="350">350</span>
-<span id="351">351</span>
 </pre><pre class="rust ">
 <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">io</span>::<span class="ident">prelude</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">io</span>;
@@ -379,7 +376,7 @@
 <span class="doccomment">///</span>
 <span class="doccomment">/// # fn zlib_encoding() -&gt; std::io::Result&lt;()&gt; {</span>
 <span class="doccomment">/// let mut e = ZlibEncoder::new(Vec::new(), Compression::default());</span>
-<span class="doccomment">/// e.write(b&quot;Hello World&quot;)?;</span>
+<span class="doccomment">/// e.write_all(b&quot;Hello World&quot;)?;</span>
 <span class="doccomment">/// let compressed = e.finish()?;</span>
 <span class="doccomment">/// # Ok(())</span>
 <span class="doccomment">/// # }</span>
@@ -388,7 +385,6 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ZlibEncoder</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span> {
     <span class="ident">inner</span>: <span class="ident">zio</span>::<span class="ident">Writer</span><span class="op">&lt;</span><span class="ident">W</span>, <span class="ident">Compress</span><span class="op">&gt;</span>,
 }
-
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span> <span class="ident">ZlibEncoder</span><span class="op">&lt;</span><span class="ident">W</span><span class="op">&gt;</span> {
     <span class="doccomment">/// Creates a new encoder which will write compressed data to the stream</span>
@@ -431,7 +427,7 @@
     <span class="doccomment">/// This function will perform I/O to complete this stream, and any I/O</span>
     <span class="doccomment">/// errors which occur will be returned from this function.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">reset</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">w</span>: <span class="ident">W</span>) <span class="op">-&gt;</span> <span class="ident">io</span>::<span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span><span class="op">&gt;</span> {
-        <span class="macro">try</span><span class="macro">!</span>(<span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">finish</span>());
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">finish</span>()<span class="question-mark">?</span>;
         <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">data</span>.<span class="ident">reset</span>();
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">replace</span>(<span class="ident">w</span>))
     }
@@ -471,7 +467,7 @@
     <span class="doccomment">/// This function will perform I/O to complete this stream, and any I/O</span>
     <span class="doccomment">/// errors which occur will be returned from this function.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">finish</span>(<span class="kw-2">mut</span> <span class="self">self</span>) <span class="op">-&gt;</span> <span class="ident">io</span>::<span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span><span class="op">&gt;</span> {
-        <span class="macro">try</span><span class="macro">!</span>(<span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">finish</span>());
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">finish</span>()<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">take_inner</span>())
     }
 
@@ -488,7 +484,7 @@
     <span class="doccomment">/// This function will perform I/O to complete this stream, and any I/O</span>
     <span class="doccomment">/// errors which occur will be returned from this function.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">flush_finish</span>(<span class="kw-2">mut</span> <span class="self">self</span>) <span class="op">-&gt;</span> <span class="ident">io</span>::<span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span><span class="op">&gt;</span> {
-        <span class="macro">try</span><span class="macro">!</span>(<span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">flush</span>());
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">flush</span>()<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">take_inner</span>())
     }
 
@@ -536,7 +532,6 @@
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;tokio&quot;</span>)]</span>
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">AsyncRead</span> <span class="op">+</span> <span class="ident">AsyncWrite</span><span class="op">&gt;</span> <span class="ident">AsyncRead</span> <span class="kw">for</span> <span class="ident">ZlibEncoder</span><span class="op">&lt;</span><span class="ident">W</span><span class="op">&gt;</span> {}
 
-
 <span class="doccomment">/// A ZLIB decoder, or decompressor.</span>
 <span class="doccomment">///</span>
 <span class="doccomment">/// This structure implements a [`Write`] and will emit a stream of decompressed</span>
@@ -555,7 +550,7 @@
 <span class="doccomment">///</span>
 <span class="doccomment">/// # fn main() {</span>
 <span class="doccomment">/// #    let mut e = ZlibEncoder::new(Vec::new(), Compression::default());</span>
-<span class="doccomment">/// #    e.write(b&quot;Hello World&quot;).unwrap();</span>
+<span class="doccomment">/// #    e.write_all(b&quot;Hello World&quot;).unwrap();</span>
 <span class="doccomment">/// #    let bytes = e.finish().unwrap();</span>
 <span class="doccomment">/// #    println!(&quot;{}&quot;, decode_reader(bytes).unwrap());</span>
 <span class="doccomment">/// # }</span>
@@ -566,7 +561,7 @@
 <span class="doccomment">/// fn decode_reader(bytes: Vec&lt;u8&gt;) -&gt; io::Result&lt;String&gt; {</span>
 <span class="doccomment">///    let mut writer = Vec::new();</span>
 <span class="doccomment">///    let mut z = ZlibDecoder::new(writer);</span>
-<span class="doccomment">///    z.write(&amp;bytes[..])?;</span>
+<span class="doccomment">///    z.write_all(&amp;bytes[..])?;</span>
 <span class="doccomment">///    writer = z.finish()?;</span>
 <span class="doccomment">///    let return_string = String::from_utf8(writer).expect(&quot;String parsing error&quot;);</span>
 <span class="doccomment">///    Ok(return_string)</span>
@@ -576,7 +571,6 @@
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ZlibDecoder</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span> {
     <span class="ident">inner</span>: <span class="ident">zio</span>::<span class="ident">Writer</span><span class="op">&lt;</span><span class="ident">W</span>, <span class="ident">Decompress</span><span class="op">&gt;</span>,
 }
-
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span> <span class="ident">ZlibDecoder</span><span class="op">&lt;</span><span class="ident">W</span><span class="op">&gt;</span> {
     <span class="doccomment">/// Creates a new decoder which will write uncompressed data to the stream.</span>
@@ -615,7 +609,7 @@
     <span class="doccomment">/// This function will perform I/O to complete this stream, and any I/O</span>
     <span class="doccomment">/// errors which occur will be returned from this function.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">reset</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">w</span>: <span class="ident">W</span>) <span class="op">-&gt;</span> <span class="ident">io</span>::<span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span><span class="op">&gt;</span> {
-        <span class="macro">try</span><span class="macro">!</span>(<span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">finish</span>());
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">finish</span>()<span class="question-mark">?</span>;
         <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">data</span> <span class="op">=</span> <span class="ident">Decompress</span>::<span class="ident">new</span>(<span class="bool-val">true</span>);
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">replace</span>(<span class="ident">w</span>))
     }
@@ -655,7 +649,7 @@
     <span class="doccomment">/// This function will perform I/O to complete this stream, and any I/O</span>
     <span class="doccomment">/// errors which occur will be returned from this function.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">finish</span>(<span class="kw-2">mut</span> <span class="self">self</span>) <span class="op">-&gt;</span> <span class="ident">io</span>::<span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">W</span><span class="op">&gt;</span> {
-        <span class="macro">try</span><span class="macro">!</span>(<span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">finish</span>());
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">finish</span>()<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">take_inner</span>())
     }
 

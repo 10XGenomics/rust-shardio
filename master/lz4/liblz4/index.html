@@ -1,5 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `liblz4` mod in crate `lz4`."><meta name="keywords" content="rust, rustlang, rust-lang, liblz4"><title>lz4::liblz4 - Rust</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><p class='location'>Module liblz4</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#reexports">Re-exports</a></li><li><a href="#structs">Structs</a></li><li><a href="#functions">Functions</a></li></ul></div><p class='location'><a href='../index.html'>lz4</a></p><script>window.sidebarCurrent = {name: 'liblz4', ty: 'mod', relpath: '../'};</script><script defer src="../sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='in-band'>Module <a href='../index.html'>lz4</a>::<wbr><a class="mod" href=''>liblz4</a></span><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../src/lz4/liblz4.rs.html#1-49' title='goto source code'>[src]</a></span></h1><h2 id='reexports' class='section-header'><a href="#reexports">Re-exports</a></h2>
-<table><tr><td><code>pub use <a class="mod" href="../../lz4_sys/index.html" title="mod lz4_sys">lz4_sys</a>::*;</code></td></tr></table><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `liblz4` mod in crate `lz4`."><meta name="keywords" content="rust, rustlang, rust-lang, liblz4"><title>lz4::liblz4 - Rust</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><p class='location'>Module liblz4</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#structs">Structs</a></li><li><a href="#enums">Enums</a></li><li><a href="#constants">Constants</a></li><li><a href="#functions">Functions</a></li><li><a href="#types">Type Definitions</a></li></ul></div><p class='location'><a href='../index.html'>lz4</a></p><script>window.sidebarCurrent = {name: 'liblz4', ty: 'mod', relpath: '../'};</script><script defer src="../sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='in-band'>Module <a href='../index.html'>lz4</a>::<wbr><a class="mod" href=''>liblz4</a></span><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../../src/lz4/liblz4.rs.html#1-49' title='goto source code'>[src]</a></span></h1><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
 <table>
                        <tr class=' module-item'>
                            <td><a class="struct" href="struct.LZ4Error.html"
@@ -7,8 +6,241 @@
                            <td class='docblock-short'>
                                 
                            </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.LZ4FCompressOptions.html"
+                                  title='struct lz4::liblz4::LZ4FCompressOptions'>LZ4FCompressOptions</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.LZ4FCompressionContext.html"
+                                  title='struct lz4::liblz4::LZ4FCompressionContext'>LZ4FCompressionContext</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.LZ4FDecompressOptions.html"
+                                  title='struct lz4::liblz4::LZ4FDecompressOptions'>LZ4FDecompressOptions</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.LZ4FDecompressionContext.html"
+                                  title='struct lz4::liblz4::LZ4FDecompressionContext'>LZ4FDecompressionContext</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.LZ4FFrameInfo.html"
+                                  title='struct lz4::liblz4::LZ4FFrameInfo'>LZ4FFrameInfo</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.LZ4FPreferences.html"
+                                  title='struct lz4::liblz4::LZ4FPreferences'>LZ4FPreferences</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.LZ4StreamDecode.html"
+                                  title='struct lz4::liblz4::LZ4StreamDecode'>LZ4StreamDecode</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="struct" href="struct.LZ4StreamEncode.html"
+                                  title='struct lz4::liblz4::LZ4StreamEncode'>LZ4StreamEncode</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr></table><h2 id='enums' class='section-header'><a href="#enums">Enums</a></h2>
+<table>
+                       <tr class=' module-item'>
+                           <td><a class="enum" href="enum.BlockMode.html"
+                                  title='enum lz4::liblz4::BlockMode'>BlockMode</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="enum" href="enum.BlockSize.html"
+                                  title='enum lz4::liblz4::BlockSize'>BlockSize</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="enum" href="enum.ContentChecksum.html"
+                                  title='enum lz4::liblz4::ContentChecksum'>ContentChecksum</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr></table><h2 id='constants' class='section-header'><a href="#constants">Constants</a></h2>
+<table>
+                       <tr class=' module-item'>
+                           <td><a class="constant" href="constant.LZ4F_VERSION.html"
+                                  title='constant lz4::liblz4::LZ4F_VERSION'>LZ4F_VERSION</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
                        </tr></table><h2 id='functions' class='section-header'><a href="#functions">Functions</a></h2>
 <table>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_compressBegin.html"
+                                  title='fn lz4::liblz4::LZ4F_compressBegin'>LZ4F_compressBegin</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_compressBound.html"
+                                  title='fn lz4::liblz4::LZ4F_compressBound'>LZ4F_compressBound</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_compressEnd.html"
+                                  title='fn lz4::liblz4::LZ4F_compressEnd'>LZ4F_compressEnd</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_compressUpdate.html"
+                                  title='fn lz4::liblz4::LZ4F_compressUpdate'>LZ4F_compressUpdate</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_createCompressionContext.html"
+                                  title='fn lz4::liblz4::LZ4F_createCompressionContext'>LZ4F_createCompressionContext</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_createDecompressionContext.html"
+                                  title='fn lz4::liblz4::LZ4F_createDecompressionContext'>LZ4F_createDecompressionContext</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_decompress.html"
+                                  title='fn lz4::liblz4::LZ4F_decompress'>LZ4F_decompress</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_flush.html"
+                                  title='fn lz4::liblz4::LZ4F_flush'>LZ4F_flush</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_freeCompressionContext.html"
+                                  title='fn lz4::liblz4::LZ4F_freeCompressionContext'>LZ4F_freeCompressionContext</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_freeDecompressionContext.html"
+                                  title='fn lz4::liblz4::LZ4F_freeDecompressionContext'>LZ4F_freeDecompressionContext</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_getErrorName.html"
+                                  title='fn lz4::liblz4::LZ4F_getErrorName'>LZ4F_getErrorName</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_getFrameInfo.html"
+                                  title='fn lz4::liblz4::LZ4F_getFrameInfo'>LZ4F_getFrameInfo</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4F_isError.html"
+                                  title='fn lz4::liblz4::LZ4F_isError'>LZ4F_isError</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4_compressBound.html"
+                                  title='fn lz4::liblz4::LZ4_compressBound'>LZ4_compressBound</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4_compress_continue.html"
+                                  title='fn lz4::liblz4::LZ4_compress_continue'>LZ4_compress_continue</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4_createStream.html"
+                                  title='fn lz4::liblz4::LZ4_createStream'>LZ4_createStream</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4_createStreamDecode.html"
+                                  title='fn lz4::liblz4::LZ4_createStreamDecode'>LZ4_createStreamDecode</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4_decompress_safe_continue.html"
+                                  title='fn lz4::liblz4::LZ4_decompress_safe_continue'>LZ4_decompress_safe_continue</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4_freeStream.html"
+                                  title='fn lz4::liblz4::LZ4_freeStream'>LZ4_freeStream</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4_freeStreamDecode.html"
+                                  title='fn lz4::liblz4::LZ4_freeStreamDecode'>LZ4_freeStreamDecode</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
+                       <tr class=' module-item'>
+                           <td><a class="fn" href="fn.LZ4_versionNumber.html"
+                                  title='fn lz4::liblz4::LZ4_versionNumber'>LZ4_versionNumber</a><a title='unsafe function' href='#'><sup>⚠</sup></a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr>
                        <tr class=' module-item'>
                            <td><a class="fn" href="fn.check_error.html"
                                   title='fn lz4::liblz4::check_error'>check_error</a></td>
@@ -19,6 +251,14 @@
                        <tr class=' module-item'>
                            <td><a class="fn" href="fn.version.html"
                                   title='fn lz4::liblz4::version'>version</a></td>
+                           <td class='docblock-short'>
+                                
+                           </td>
+                       </tr></table><h2 id='types' class='section-header'><a href="#types">Type Definitions</a></h2>
+<table>
+                       <tr class=' module-item'>
+                           <td><a class="type" href="type.LZ4FErrorCode.html"
+                                  title='type lz4::liblz4::LZ4FErrorCode'>LZ4FErrorCode</a></td>
                            <td class='docblock-short'>
                                 
                            </td>

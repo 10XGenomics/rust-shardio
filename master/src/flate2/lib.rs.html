@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `/home/travis/.cargo/registry/src/github.com-1ecc6299db9ec823/flate2-1.0.1/src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `/home/travis/.cargo/registry/src/github.com-1ecc6299db9ec823/flate2-1.0.2/src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
 <span id="4">  4</span>
@@ -202,6 +202,16 @@
 <span id="202">202</span>
 <span id="203">203</span>
 <span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
 </pre><pre class="rust ">
 <span class="doccomment">//! A DEFLATE-based stream compression/decompression library</span>
 <span class="doccomment">//!</span>
@@ -232,7 +242,7 @@
 <span class="doccomment">//! # fn main() { let _ = run(); }</span>
 <span class="doccomment">//! # fn run() -&gt; io::Result&lt;()&gt; {</span>
 <span class="doccomment">//! let mut encoder = GzEncoder::new(Vec::new(), Compression::default());</span>
-<span class="doccomment">//! encoder.write(b&quot;Example&quot;)?;</span>
+<span class="doccomment">//! encoder.write_all(b&quot;Example&quot;)?;</span>
 <span class="doccomment">//! # Ok(())</span>
 <span class="doccomment">//! # }</span>
 <span class="doccomment">//! ```</span>
@@ -294,9 +304,9 @@
 
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">gz</span>::<span class="ident">GzBuilder</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">gz</span>::<span class="ident">GzHeader</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">mem</span>::{<span class="ident">Compress</span>, <span class="ident">CompressError</span>, <span class="ident">DecompressError</span>, <span class="ident">Decompress</span>, <span class="ident">Status</span>};
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">mem</span>::{<span class="ident">Compress</span>, <span class="ident">CompressError</span>, <span class="ident">Decompress</span>, <span class="ident">DecompressError</span>, <span class="ident">Status</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">mem</span>::{<span class="ident">FlushCompress</span>, <span class="ident">FlushDecompress</span>};
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">crc</span>::{<span class="ident">Crc</span>, <span class="ident">CrcReader</span>};
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">crc</span>::{<span class="ident">Crc</span>, <span class="ident">CrcReader</span>, <span class="ident">CrcWriter</span>};
 
 <span class="kw">mod</span> <span class="ident">bufreader</span>;
 <span class="kw">mod</span> <span class="ident">crc</span>;
@@ -331,6 +341,7 @@
     <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">zlib</span>::<span class="ident">write</span>::<span class="ident">ZlibEncoder</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">zlib</span>::<span class="ident">write</span>::<span class="ident">ZlibDecoder</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">gz</span>::<span class="ident">write</span>::<span class="ident">GzEncoder</span>;
+    <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">gz</span>::<span class="ident">write</span>::<span class="ident">GzDecoder</span>;
 }
 
 <span class="doccomment">/// Types which operate over [`BufRead`] streams, both encoders and decoders for</span>
@@ -362,6 +373,7 @@
     <span class="ident">_assert_send_sync</span>::<span class="op">&lt;</span><span class="ident">write</span>::<span class="ident">ZlibEncoder</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;&gt;</span><span class="op">&gt;</span>();
     <span class="ident">_assert_send_sync</span>::<span class="op">&lt;</span><span class="ident">write</span>::<span class="ident">ZlibDecoder</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;&gt;</span><span class="op">&gt;</span>();
     <span class="ident">_assert_send_sync</span>::<span class="op">&lt;</span><span class="ident">write</span>::<span class="ident">GzEncoder</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;&gt;</span><span class="op">&gt;</span>();
+    <span class="ident">_assert_send_sync</span>::<span class="op">&lt;</span><span class="ident">write</span>::<span class="ident">GzDecoder</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;&gt;</span><span class="op">&gt;</span>();
 }
 
 <span class="doccomment">/// When compressing data, the compression level can be specified by a value in</span>
@@ -406,6 +418,14 @@
     <span class="kw">fn</span> <span class="ident">default</span>() <span class="op">-&gt;</span> <span class="ident">Compression</span> {
         <span class="ident">Compression</span>(<span class="number">6</span>)
     }
+}
+
+<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
+<span class="kw">fn</span> <span class="ident">random_bytes</span>() <span class="op">-&gt;</span> <span class="kw">impl</span> <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">u8</span><span class="op">&gt;</span> {
+    <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">iter</span>;
+    <span class="kw">use</span> <span class="ident">rand</span>::<span class="ident">Rng</span>;
+
+    <span class="ident">iter</span>::<span class="ident">repeat</span>(()).<span class="ident">map</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">rand</span>::<span class="ident">thread_rng</span>().<span class="ident">gen</span>())
 }
 </pre>
 </section><section id="search" class="content hidden"></section><section class="footer"></section><aside id="help" class="hidden"><div><h1 class="hidden">Help</h1><div class="shortcuts"><h2>Keyboard Shortcuts</h2><dl><dt><kbd>?</kbd></dt><dd>Show this help dialog</dd><dt><kbd>S</kbd></dt><dd>Focus the search field</dd><dt><kbd>↑</kbd></dt><dd>Move up in search results</dd><dt><kbd>↓</kbd></dt><dd>Move down in search results</dd><dt><kbd>↹</kbd></dt><dd>Switch tab</dd><dt><kbd>&#9166;</kbd></dt><dd>Go to active search result</dd><dt><kbd>+</kbd></dt><dd>Expand all sections</dd><dt><kbd>-</kbd></dt><dd>Collapse all sections</dd></dl></div><div class="infos"><h2>Search Tricks</h2><p>Prefix searches with a type followed by a colon (e.g. <code>fn:</code>) to restrict the search to a given type.</p><p>Accepted types are: <code>fn</code>, <code>mod</code>, <code>struct</code>, <code>enum</code>, <code>trait</code>, <code>type</code>, <code>macro</code>, and <code>const</code>.</p><p>Search functions by type signature (e.g. <code>vec -> usize</code> or <code>* -> vec</code>)</p><p>Search multiple things at once by splitting your query with comma (e.g. <code>str,u8</code> or <code>String,struct:Vec,test</code>)</p></div></div></aside><script>window.rootPath = "../../";window.currentCrate = "flate2";</script><script src="../../aliases.js"></script><script src="../../main.js"></script><script defer src="../../search-index.js"></script></body></html>
