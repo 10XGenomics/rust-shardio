@@ -82,6 +82,7 @@ ALIASES['serde_derive'] = {};
 ALIASES['serde_derive'] = {};
 ALIASES['shardio'] = {};
 ALIASES['shardio'] = {};
+ALIASES['shardio'] = {};
 ALIASES['smallvec'] = {};
 ALIASES['smallvec'] = {};
 ALIASES['stable_deref_trait'] = {};
