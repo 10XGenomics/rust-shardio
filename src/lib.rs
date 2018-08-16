@@ -1130,22 +1130,20 @@ where
 
         // Divide the known start locations into chunks, and
         // use setup start positions.
-        let mut chunk_starts = Vec::new();
-        let mut acc = 0.0;
-        let interval = (starts.len() as f64 / num_chunks as f64).max(1.0);
-        for i in 0..num_chunks {
-            let start = if i == 0 {
-                range.start.clone()
-            } else {
-                acc += interval;
-                let idx = acc.round() as usize;
-                if idx >= starts.len() {
-                    break;
-                }
-                Some(starts[idx].clone())
-            };
-            chunk_starts.push(start);
-        }
+        let chunk_starts = if starts.len() <= num_chunks {
+            starts.into_iter().map(|x| Some(x)).collect::<Vec<_>>()
+        } else {
+            let n = starts.len();
+            (0..num_chunks)
+                .map(|i| {
+                    if i == 0 {
+                        range.start.clone()
+                    } else {
+                        let idx = ((n * i) as f64 / num_chunks as f64).round() as usize;
+                        Some(starts[idx].clone())
+                    }
+                }).collect::<Vec<_>>()
+        };
 
         let mut chunks = Vec::new();
         for (i, start) in chunk_starts.iter().enumerate() {
