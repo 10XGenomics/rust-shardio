@@ -1131,12 +1131,18 @@ where
         // Divide the known start locations into chunks, and
         // use setup start positions.
         let mut chunk_starts = Vec::new();
-        let chunks = starts.chunks(std::cmp::max(1, starts.len() / num_chunks));
-        for (i, c) in chunks.enumerate() {
+        let mut acc = 0.0;
+        let interval = (starts.len() as f64 / num_chunks as f64).max(1.0);
+        for i in 0..num_chunks {
             let start = if i == 0 {
                 range.start.clone()
             } else {
-                Some(c[0].clone())
+                acc += interval;
+                let idx = acc.round() as usize;
+                if idx >= starts.len() {
+                    break;
+                }
+                Some(starts[idx].clone())
             };
             chunk_starts.push(start);
         }
@@ -1402,6 +1408,7 @@ mod shard_tests {
             for rc in &[1, 4, 7, 12, 15, 21, 65] {
                 all_items_chunks.clear();
                 let chunks = set_reader.make_chunks(*rc, &Range::all());
+                assert!(chunks.len() <= *rc, "chunks > req: ({} > {})", chunks.len(), *rc);
                 for c in chunks {
                     let itr = set_reader.iter_range(&c);
                     all_items_chunks.extend(itr);
