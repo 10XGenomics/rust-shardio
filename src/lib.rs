@@ -1132,7 +1132,7 @@ where
         // use setup start positions.
         let mut chunk_starts = Vec::new();
         let mut acc = 0.0;
-        let interval = (starts.len() as f64 / (num_chunks + 1) as f64).max(1.0);
+        let interval = (starts.len() as f64 / num_chunks as f64).max(1.0);
         for i in 0..num_chunks {
             let start = if i == 0 {
                 range.start.clone()
