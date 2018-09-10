@@ -26,7 +26,7 @@
 //!         // Parameters here  buffering, and the size of disk chunks
 //!         // which affect how many disk chunks need to be read to
 //!         // satisfy a range query when reading.
-//!         let manager: ShardWriter<Test, Test> =
+//!         let manager: ShardWriter<Test> =
 //!             ShardWriter::new(filename, 64, 256, 1<<16).unwrap();
 //!
 //!         // Get a handle to send data to the file
@@ -39,7 +39,7 @@
 //!     }
 //!
 //!     // Open finished file & test chunked reads
-//!     let reader = ShardReader::<Test, Test>::open(filename);
+//!     let reader = ShardReader::<Test>::open(filename);
 //!
 //!     // Read back data
 //!     let mut all_items = Vec::new();
@@ -83,6 +83,7 @@ extern crate tempfile;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::borrow::Cow;
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::path::Path;
@@ -225,20 +226,24 @@ impl<K: Ord + Serialize> FileManager<K> {
     }
 }
 
-/// Specify a key function from data items of type `T` to a sort key of type `K`.
-/// Implment this trait to create a custom sort order.
-pub trait SortKey<T, K: Ord + Clone> {
-    fn sort_key(t: &T) -> &K;
+/// Specify a key function from data items of type `T` to a sort key of type `Key`.
+/// Impelment this trait to create a custom sort order.
+/// The function `sort_key` returns a `Cow` so that we abstract over Owned or
+/// Borrowed data.
+pub trait SortKey<T> {
+    type Key: Ord + Clone;
+    fn sort_key(t: &T) -> Cow<Self::Key>;
 }
 
 /// Marker struct for sorting types that implement `Ord` in their 'natural' order.
 pub struct DefaultSort;
-impl<T> SortKey<T, T> for DefaultSort
+impl<T> SortKey<T> for DefaultSort
 where
     T: Ord + Clone,
 {
-    fn sort_key(t: &T) -> &T {
-        t
+    type Key = T;
+    fn sort_key(t: &T) -> Cow<T> {
+        Cow::Borrowed(t)
     }
 }
 
@@ -249,14 +254,13 @@ where
 /// prior to dropping the ShardWriter.
 ///
 /// # Sorting
-/// Items are sorted according to the `Ord` implementation of type `K`. Type `S`, implementing the `SortKey` trait
-/// maps items of type `T` to their sort key of type `K`. By default the sort key is the data item itself, and the
+/// Items are sorted according to the `Ord` implementation of type `S::Key`. Type `S`, implementing the `SortKey` trait
+/// maps items of type `T` to their sort key of type `S::Key`. By default the sort key is the data item itself, and the
 /// the `DefaultSort` implementation of `SortKey` is the identity function.
-pub struct ShardWriter<T, K = T, S = DefaultSort> {
+pub struct ShardWriter<T, S = DefaultSort> {
     helper: ShardWriterHelper<T>,
     sender_buffer_size: usize,
-    p1: PhantomData<K>,
-    p2: PhantomData<S>,
+    sort: PhantomData<S>,
     closed: bool,
 }
 
@@ -266,11 +270,11 @@ struct ShardWriterHelper<T> {
     writer_thread: Option<JoinHandle<Result<usize, Error>>>,
 }
 
-impl<T, K, S> ShardWriter<T, K, S>
+impl<T, S> ShardWriter<T, S>
 where
     T: 'static + Send + Serialize,
-    K: 'static + Send + Ord + Serialize + Clone,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: 'static + Send + Ord + Serialize + Clone,
 {
     /// Create a writer for storing data items of type `T`.
     /// # Arguments
@@ -285,7 +289,7 @@ where
         sender_buffer_size: usize,
         disk_chunk_size: usize,
         item_buffer_size: usize,
-    ) -> Result<ShardWriter<T, K, S>, Error> {
+    ) -> Result<ShardWriter<T, S>, Error> {
         let (send, recv) = bounded(4);
 
         // Ping-pong of the 2 item buffer between the thread the accumulates the items,
@@ -305,9 +309,9 @@ where
 
         let buffer_thread = thread::spawn(move || sbt.process());
 
-        let writer = FileManager::<K>::new(p2)?;
+        let writer = FileManager::<<S as SortKey<T>>::Key>::new(p2)?;
         let writer_thread = thread::spawn(move || {
-            let mut swt = ShardWriterThread::<_, _, S>::new(
+            let mut swt = ShardWriterThread::<_, S>::new(
                 disk_chunk_size,
                 writer,
                 to_writer_recv,
@@ -325,8 +329,7 @@ where
             },
             sender_buffer_size,
             closed: false,
-            p1: PhantomData,
-            p2: PhantomData,
+            sort: PhantomData,
         })
     }
 
@@ -367,7 +370,7 @@ fn convert_thread_panic<T>(thread_result: thread::Result<Result<T, Error>>) -> R
     }
 }
 
-impl<T, K, S> Drop for ShardWriter<T, K, S> {
+impl<T, S> Drop for ShardWriter<T, S> {
     fn drop(&mut self) {
         if !self.closed {
             self.helper.tx.send(None).unwrap();
@@ -458,28 +461,32 @@ where
 /// Sort buffered items, break large buffer into chunks.
 /// Serialize, compress and write the each chunk. The
 /// file manager maintains the index data.
-struct ShardWriterThread<T, K, S> {
+struct ShardWriterThread<T, S>
+where
+    T: Send + Serialize,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone + Serialize,
+{
     chunk_size: usize,
-    writer: FileManager<K>,
+    writer: FileManager<<S as SortKey<T>>::Key>,
     buf_rx: Receiver<(Vec<T>, bool)>,
     buf_tx: Sender<Vec<T>>,
     serialize_buffer: Vec<u8>,
     compress_buffer: Vec<u8>,
-    phantom: PhantomData<S>,
 }
 
-impl<T, K, S> ShardWriterThread<T, K, S>
+impl<T, S> ShardWriterThread<T, S>
 where
     T: Send + Serialize,
-    K: Ord + Clone + Serialize,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
     fn new(
         chunk_size: usize,
-        writer: FileManager<K>,
+        writer: FileManager< <S as SortKey<T>>::Key >,
         buf_rx: Receiver<(Vec<T>, bool)>,
         buf_tx: Sender<Vec<T>>,
-    ) -> ShardWriterThread<T, K, S> {
+    ) -> ShardWriterThread<T, S> {
         ShardWriterThread {
             chunk_size,
             writer,
@@ -487,7 +494,6 @@ where
             buf_tx,
             serialize_buffer: Vec::new(),
             compress_buffer: Vec::new(),
-            phantom: PhantomData,
         }
     }
 
@@ -500,7 +506,7 @@ where
             n_items += buf.len();
 
             // Sort by sort key
-            buf.sort_by(|x, y| S::sort_key(x).cmp(S::sort_key(y)));
+            buf.sort_by(|x, y| S::sort_key(x).cmp(&S::sort_key(y)));
 
             // Write out the buffer chunks
             for c in buf.chunks(self.chunk_size) {
@@ -540,8 +546,8 @@ where
         self.serialize_buffer.clear();
         self.compress_buffer.clear();
         let bounds = (
-            S::sort_key(&items[0]).clone(),
-            S::sort_key(&items[items.len() - 1]).clone(),
+            S::sort_key(&items[0]).into_owned(),
+            S::sort_key(&items[items.len() - 1]).into_owned(),
         );
 
         serialize_into(&mut self.serialize_buffer, items)?;
@@ -596,7 +602,7 @@ pub struct ShardSender<T: Send> {
 }
 
 impl<T: Send> ShardSender<T> {
-    fn new<K, S>(writer: &ShardWriter<T, K, S>) -> ShardSender<T> {
+    fn new<S>(writer: &ShardWriter<T, S>) -> ShardSender<T> {
         let new_tx = writer.helper.tx.clone();
         let buffer = Vec::with_capacity(writer.sender_buffer_size);
 
@@ -652,21 +658,23 @@ impl<T: Send> Drop for ShardSender<T> {
 }
 
 /// Read a shardio file
-struct ShardReaderSingle<T, K, S = DefaultSort> {
+struct ShardReaderSingle<T, S = DefaultSort> 
+where S: SortKey<T>
+{
     file: File,
-    index: Vec<ShardRecord<K>>,
+    index: Vec<ShardRecord<<S as SortKey<T>>::Key>>,
     p1: PhantomData<T>,
-    p2: PhantomData<S>,
+    // p2: PhantomData<S>,
 }
 
-impl<T, K, S> ShardReaderSingle<T, K, S>
+impl<T, S> ShardReaderSingle<T, S>
 where
     T: DeserializeOwned,
-    K: Clone + Ord + DeserializeOwned,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
 {
     /// Open a shard file that stores `T` items.
-    fn open<P: AsRef<Path>>(path: P) -> ShardReaderSingle<T, K, S> {
+    fn open<P: AsRef<Path>>(path: P) -> ShardReaderSingle<T, S> {
         let mut f = File::open(path).unwrap();
 
         let mut index = Self::read_index_block(&mut f);
@@ -676,12 +684,12 @@ where
             file: f,
             index,
             p1: PhantomData,
-            p2: PhantomData,
+            // p2: PhantomData,
         }
     }
 
     /// Read shard index
-    fn read_index_block(file: &mut File) -> Vec<ShardRecord<K>> {
+    fn read_index_block(file: &mut File) -> Vec<ShardRecord<<S as SortKey<T>>::Key>> {
         let _ = file.seek(SeekFrom::End(-24)).unwrap();
         let _num_shards = file.read_u64::<BigEndian>().unwrap() as usize;
         let index_block_position = file.read_u64::<BigEndian>().unwrap();
@@ -703,7 +711,7 @@ where
         ZlibDecoder::new(buffer.as_slice())
     }
 
-    pub fn read_range(&self, range: &Range<K>, data: &mut Vec<T>, buf: &mut Vec<u8>) {
+    pub fn read_range(&self, range: &Range<<S as SortKey<T>>::Key>, data: &mut Vec<T>, buf: &mut Vec<u8>) {
         for rec in self.index
             .iter()
             .cloned()
@@ -722,14 +730,14 @@ where
             data.extend(r.into_iter().filter(|x| range.contains(&S::sort_key(x))));
         }
 
-        data.sort_by(|x, y| S::sort_key(x).cmp(S::sort_key(y)));
+        data.sort_by(|x, y| S::sort_key(x).cmp(&S::sort_key(y)));
     }
 
-    pub fn iter_range(&self, range: &Range<K>) -> ShardItemIter<T, K, S> {
+    pub fn iter_range(&self, range: &Range<<S as SortKey<T>>::Key>) -> ShardItemIter<T, S> {
         ShardItemIter::new(&self, range.clone())
     }
 
-    fn read_shard(&self, rec: &ShardRecord<K>, buf: &mut Vec<u8>) -> Vec<T> {
+    fn read_shard(&self, rec: &ShardRecord<<S as SortKey<T>>::Key>, buf: &mut Vec<u8>) -> Vec<T> {
         buf.resize(rec.len_bytes, 0);
         let read_len = read_at(
             &self.file.as_raw_fd(),
@@ -747,32 +755,30 @@ where
     }
 }
 
-struct MergeVec<T, K, S> {
+struct MergeVec<T, S> {
     items: Vec<T>,
-    phantom_k: PhantomData<K>,
     phantom_s: PhantomData<S>,
 }
 
-impl<'a, T, K, S> MergeVec<T, K, S>
+impl<'a, T, S> MergeVec<T, S>
 where
-    S: SortKey<T, K>,
-    K: Ord + Clone,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
 {
-    pub fn new(items: Vec<T>) -> MergeVec<T, K, S> {
+    pub fn new(items: Vec<T>) -> MergeVec<T, S> {
         assert!(items.len() > 0);
 
         MergeVec {
             items: items,
-            phantom_k: PhantomData,
             phantom_s: PhantomData,
         }
     }
 
-    pub fn current_key(&self) -> &K {
+    pub fn current_key(&self) -> Cow<<S as SortKey<T>>::Key> {
         S::sort_key(&self.items[self.items.len() - 1])
     }
 
-    pub fn pop(mut self) -> (T, Option<MergeVec<T, K, S>>) {
+    pub fn pop(mut self) -> (T, Option<MergeVec<T, S>>) {
         let item = self.items.pop().unwrap();
 
         if self.items.len() == 0 {
@@ -782,7 +788,6 @@ where
                 item,
                 Some(MergeVec {
                     items: self.items,
-                    phantom_k: PhantomData,
                     phantom_s: PhantomData,
                 }),
             )
@@ -790,64 +795,68 @@ where
     }
 }
 
-impl<T, K, S> Ord for MergeVec<T, K, S>
+impl<T, S> Ord for MergeVec<T, S>
 where
-    K: Ord + Clone,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
 {
-    fn cmp(&self, other: &MergeVec<T, K, S>) -> Ordering {
-        self.current_key().cmp(other.current_key())
+    fn cmp(&self, other: &MergeVec<T, S>) -> Ordering {
+        self.current_key().cmp(&other.current_key())
     }
 }
 
-impl<T, K, S> PartialOrd for MergeVec<T, K, S>
+impl<T, S> PartialOrd for MergeVec<T, S>
 where
-    K: Ord + Clone,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
 {
-    fn partial_cmp(&self, other: &MergeVec<T, K, S>) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &MergeVec<T, S>) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T, K, S> PartialEq for MergeVec<T, K, S>
+impl<T, S> PartialEq for MergeVec<T, S>
 where
-    K: Ord + Clone,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
 {
-    fn eq(&self, other: &MergeVec<T, K, S>) -> bool {
+    fn eq(&self, other: &MergeVec<T, S>) -> bool {
         self.current_key() == other.current_key()
     }
 }
 
-impl<T, K, S> Eq for MergeVec<T, K, S>
+impl<T, S> Eq for MergeVec<T, S>
 where
-    K: Ord + Clone,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
 {
 }
 
 use std::cmp::Ordering;
 
 /// Iterator of items from a single shardio reader
-pub struct ShardItemIter<'a, T: 'a, K: 'a, S: 'a> {
-    reader: &'a ShardReaderSingle<T, K, S>,
+pub struct ShardItemIter<'a, T: 'a, S: 'a> 
+where 
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: 'a + Ord + Clone,
+{
+    reader: &'a ShardReaderSingle<T, S>,
     buf: Vec<u8>,
-    range: Range<K>,
-    active_queue: MinMaxHeap<MergeVec<T, K, S>>,
-    waiting_queue: MinMaxHeap<&'a ShardRecord<K>>,
+    range: Range<<S as SortKey<T>>::Key>,
+    active_queue: MinMaxHeap<MergeVec<T, S>>,
+    waiting_queue: MinMaxHeap<&'a ShardRecord<<S as SortKey<T>>::Key>>,
 }
 
-impl<'a, T, K, S> ShardItemIter<'a, T, K, S>
+impl<'a, T, S> ShardItemIter<'a, T, S>
 where
     T: DeserializeOwned,
-    K: Clone + Ord + DeserializeOwned,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: 'a + Clone + Ord + DeserializeOwned
 {
-    fn new(reader: &'a ShardReaderSingle<T, K, S>, range: Range<K>) -> ShardItemIter<'a, T, K, S> {
+    fn new(reader: &'a ShardReaderSingle<T, S>, range: Range<<S as SortKey<T>>::Key>) -> ShardItemIter<'a, T, S> {
         let mut buf = Vec::new();
 
-        let shards: Vec<&ShardRecord<K>> = reader
+        let shards: Vec<&ShardRecord<_>> = reader
             .index
             .iter()
             .filter(|x| range.intersects_shard(x))
@@ -878,7 +887,7 @@ where
     }
 
     /// What key is next among the active set
-    fn peek_active_next(&self) -> Option<&K> {
+    fn peek_active_next(&self) -> Option<Cow<<S as SortKey<T>>::Key>> {
         let n = self.active_queue.peek_min();
         n.map(|v| v.current_key())
     }
@@ -886,7 +895,7 @@ where
     /// Restore all the shards that start at or before this item, or the next usable shard
     fn activate_shards(&mut self) {
         while self.waiting_queue.peek_min().map_or(false, |shard| {
-            Some(&shard.start_key) <= self.peek_active_next()
+            Some(Cow::Borrowed(&shard.start_key)) <= self.peek_active_next()
         }) || (self.peek_active_next().is_none() && self.waiting_queue.len() > 0)
         {
             let shard = self.waiting_queue.pop_min().unwrap();
@@ -911,11 +920,11 @@ where
     }
 }
 
-impl<'a, T, K, S> Iterator for ShardItemIter<'a, T, K, S>
+impl<'a, T, S> Iterator for ShardItemIter<'a, T, S>
 where
     T: DeserializeOwned,
-    K: Clone + Ord + DeserializeOwned,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
 {
     type Item = T;
 
@@ -937,74 +946,75 @@ where
     }
 }
 
-struct SortableItem<T, K, S> {
+struct SortableItem<T, S> {
     item: T,
-    phantom_k: PhantomData<K>,
     phantom_s: PhantomData<S>,
 }
 
-impl<T, K, S> SortableItem<T, K, S> {
-    fn new(item: T) -> SortableItem<T, K, S> {
+impl<T, S> SortableItem<T, S> {
+    fn new(item: T) -> SortableItem<T, S> {
         SortableItem {
             item,
-            phantom_k: PhantomData,
             phantom_s: PhantomData,
         }
     }
 }
 
-impl<T, K, S> Ord for SortableItem<T, K, S>
+impl<T, S> Ord for SortableItem<T, S>
 where
-    K: Ord + Clone,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
 {
-    fn cmp(&self, other: &SortableItem<T, K, S>) -> Ordering {
-        S::sort_key(&self.item).cmp(S::sort_key(&other.item))
+    fn cmp(&self, other: &SortableItem<T, S>) -> Ordering {
+        S::sort_key(&self.item).cmp(&S::sort_key(&other.item))
     }
 }
 
-impl<T, K, S> PartialOrd for SortableItem<T, K, S>
+impl<T, S> PartialOrd for SortableItem<T, S>
 where
-    K: Ord + Clone,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
 {
-    fn partial_cmp(&self, other: &SortableItem<T, K, S>) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &SortableItem<T, S>) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T, K, S> PartialEq for SortableItem<T, K, S>
+impl<T, S> PartialEq for SortableItem<T, S>
 where
-    K: Ord + Clone,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
 {
-    fn eq(&self, other: &SortableItem<T, K, S>) -> bool {
+    fn eq(&self, other: &SortableItem<T, S>) -> bool {
         S::sort_key(&self.item) == S::sort_key(&other.item)
     }
 }
 
-impl<T, K, S> Eq for SortableItem<T, K, S>
+impl<T, S> Eq for SortableItem<T, S>
 where
-    K: Ord + Clone,
-    S: SortKey<T, K>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
 {
 }
 
 /// Iterator over merged shardio files
-pub struct MergeIterator<'a, T: 'a, K: 'a, S: 'a> {
-    iterators: Vec<ShardItemIter<'a, T, K, S>>,
-    merge_heap: MinMaxHeap<(SortableItem<T, K, S>, usize)>,
-    phantom_k: PhantomData<K>,
+pub struct MergeIterator<'a, T: 'a, S: 'a> 
+where
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: 'a + Ord + Clone,
+{
+    iterators: Vec<ShardItemIter<'a, T, S>>,
+    merge_heap: MinMaxHeap<(SortableItem<T, S>, usize)>,
     phantom_s: PhantomData<S>,
 }
 
-impl<'a, T, K, S> MergeIterator<'a, T, K, S>
+impl<'a, T, S> MergeIterator<'a, T, S>
 where
-    K: Clone + Ord,
-    S: SortKey<T, K>,
-    ShardItemIter<'a, T, K, S>: Iterator<Item = T>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: 'a + Ord + Clone,
+    ShardItemIter<'a, T, S>: Iterator<Item = T>,
 {
-    fn new(mut iterators: Vec<ShardItemIter<'a, T, K, S>>) -> MergeIterator<'a, T, K, S> {
+    fn new(mut iterators: Vec<ShardItemIter<'a, T, S>>) -> MergeIterator<'a, T, S> {
         let mut merge_heap = MinMaxHeap::new();
 
         for (idx, itr) in iterators.iter_mut().enumerate() {
@@ -1020,7 +1030,6 @@ where
         MergeIterator {
             iterators,
             merge_heap,
-            phantom_k: PhantomData,
             phantom_s: PhantomData,
         }
     }
@@ -1028,11 +1037,11 @@ where
 
 use std::iter::Iterator;
 
-impl<'a, T: 'a, K: 'a, S: 'a> Iterator for MergeIterator<'a, T, K, S>
+impl<'a, T: 'a, S: 'a> Iterator for MergeIterator<'a, T, S>
 where
-    K: Clone + Ord,
-    S: SortKey<T, K>,
-    ShardItemIter<'a, T, K, S>: Iterator<Item = T>,
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: 'a + Ord + Clone,
+    ShardItemIter<'a, T, S>: Iterator<Item = T>,
 {
     type Item = T;
 
@@ -1057,18 +1066,21 @@ where
 /// Read from a collection of shardio files. The input data is merged to give
 /// a single sorted view of the combined dataset. The input files must
 /// be created with the same sort order `S` as they are read with.
-pub struct ShardReader<T, K, S = DefaultSort> {
-    readers: Vec<ShardReaderSingle<T, K, S>>,
+pub struct ShardReader<T, S = DefaultSort> 
+where
+    S: SortKey<T>,
+{
+    readers: Vec<ShardReaderSingle<T, S>>,
 }
 
-impl<T, K, S> ShardReader<T, K, S>
+impl<T, S> ShardReader<T, S>
 where
     T: DeserializeOwned,
-    K: Clone + Ord + DeserializeOwned,
-    S: SortKey<T, K>,
+    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
+    S: SortKey<T>,
 {
     /// Open a single shard files into reader
-    pub fn open<P: AsRef<Path>>(shard_file: P) -> ShardReader<T, K, S> {
+    pub fn open<P: AsRef<Path>>(shard_file: P) -> ShardReader<T, S> {
         let mut readers = Vec::new();
         let reader = ShardReaderSingle::open(shard_file);
         readers.push(reader);
@@ -1077,7 +1089,7 @@ where
     }
 
     /// Open a set of shard files into an aggregated reader
-    pub fn open_set<P: AsRef<Path>>(shard_files: &[P]) -> ShardReader<T, K, S> {
+    pub fn open_set<P: AsRef<Path>>(shard_files: &[P]) -> ShardReader<T, S> {
         let mut readers = Vec::new();
 
         for p in shard_files {
@@ -1089,7 +1101,7 @@ where
     }
 
     /// Read data from the given `range` into `data` buffer. The `data` buffer is not cleared before adding items.
-    pub fn read_range(&self, range: &Range<K>, data: &mut Vec<T>) {
+    pub fn read_range(&self, range: &Range<<S as SortKey<T>>::Key>, data: &mut Vec<T>) {
         let mut buf = Vec::new();
         for r in &self.readers {
             r.read_range(range, data, &mut buf)
@@ -1097,13 +1109,13 @@ where
     }
 
     /// Iterate over items in the given `range`
-    pub fn iter_range<'a>(&'a self, range: &Range<K>) -> MergeIterator<'a, T, K, S> {
+    pub fn iter_range<'a>(&'a self, range: &Range<<S as SortKey<T>>::Key>) -> MergeIterator<'a, T, S> {
         let iters: Vec<_> = self.readers.iter().map(|r| r.iter_range(range)).collect();
         MergeIterator::new(iters)
     }
 
     /// Iterate over all items
-    pub fn iter<'a>(&'a self) -> MergeIterator<'a, T, K, S> {
+    pub fn iter<'a>(&'a self) -> MergeIterator<'a, T, S> {
         self.iter_range(&Range::all())
     }
 
@@ -1114,7 +1126,7 @@ where
 
     /// Generate `num_chunks` ranges covering the give `range`, each with a roughly equal numbers of elements.
     /// The ranges can be fed to `iter_range`
-    pub fn make_chunks(&self, num_chunks: usize, range: &Range<K>) -> Vec<Range<K>> {
+    pub fn make_chunks(&self, num_chunks: usize, range: &Range<<S as SortKey<T>>::Key>) -> Vec<Range<<S as SortKey<T>>::Key>> {
         assert!(num_chunks > 0);
 
         // Enumerate all the in-range known start locations in the dataset
@@ -1181,9 +1193,10 @@ mod shard_tests {
     }
 
     struct FieldDSort;
-    impl SortKey<T1, u8> for FieldDSort {
-        fn sort_key(item: &T1) -> &u8 {
-            &item.d
+    impl SortKey<T1> for FieldDSort {
+        type Key = u8;
+        fn sort_key(item: &T1) -> Cow<u8> {
+            Cow::Borrowed(&item.d)
         }
     }
 
@@ -1305,7 +1318,7 @@ mod shard_tests {
 
         // Write and close file
         let true_items = {
-            let manager: ShardWriter<T1, T1> = ShardWriter::new(
+            let manager: ShardWriter<T1> = ShardWriter::new(
                 tmp.path(),
                 producer_chunk_size,
                 disk_chunk_size,
@@ -1328,7 +1341,7 @@ mod shard_tests {
 
         if do_read {
             // Open finished file
-            let reader = ShardReader::<T1, T1>::open(tmp.path());
+            let reader = ShardReader::<T1>::open(tmp.path());
 
             let all_items = reader.iter_range(&Range::all()).collect();
             set_compare(&true_items, &all_items);
@@ -1341,7 +1354,7 @@ mod shard_tests {
 
             for rc in [1, 3, 8, 15].iter() {
                 // Open finished file & test chunked reads
-                let set_reader = ShardReader::<T1, T1>::open(&tmp.path());
+                let set_reader = ShardReader::<T1>::open(&tmp.path());
                 let mut all_items_chunks = Vec::new();
 
                 // Read in chunks
@@ -1371,7 +1384,7 @@ mod shard_tests {
 
         // Write and close file
         let true_items = {
-            let manager: ShardWriter<T1, u8, FieldDSort> = ShardWriter::new(
+            let manager: ShardWriter<T1, FieldDSort> = ShardWriter::new(
                 tmp.path(),
                 producer_chunk_size,
                 disk_chunk_size,
@@ -1394,13 +1407,13 @@ mod shard_tests {
 
         if do_read {
             // Open finished file
-            let reader = ShardReader::<T1, u8, FieldDSort>::open(tmp.path());
+            let reader = ShardReader::<T1, FieldDSort>::open(tmp.path());
 
             let all_items = reader.iter_range(&Range::all()).collect();
             set_compare(&true_items, &all_items);
 
             // Open finished file & test chunked reads
-            let set_reader = ShardReader::<T1, u8, FieldDSort>::open(tmp.path());
+            let set_reader = ShardReader::<T1, FieldDSort>::open(tmp.path());
             let mut all_items_chunks = Vec::new();
 
             for rc in &[1, 4, 7, 12, 15, 21, 65] {
