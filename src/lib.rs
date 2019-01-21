@@ -1182,7 +1182,7 @@ mod shard_tests {
     use std::collections::HashSet;
     use std::fmt::Debug;
     use std::hash::Hash;
-    use std::iter::FromIterator;
+    use std::iter::{FromIterator, repeat};
     use std::u8;
     use tempfile;
 
@@ -1223,7 +1223,7 @@ mod shard_tests {
     #[cfg(feature = "full-test")]
     #[test]
     fn test_read_write_at() {
-        let tmp = tempfile::tempfile().unwrap();
+        let tmp = tempfile::NamedTempFile::new().unwrap();
 
         let n = (1 << 31) - 1000;
         let mut buf = Vec::with_capacity(n);
@@ -1287,6 +1287,61 @@ mod shard_tests {
     fn test_shard_round_trip_big() {
         // Play with these settings to test perf.
         check_round_trip_opt(1024, 64, 1 << 18, 1 << 20, false);
+    }
+
+    #[test]
+    fn test_shard_one_key() {
+        let n_items = 1 << 16;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+
+        // Write and close file
+        let true_items = {
+            let manager: ShardWriter<T1> = ShardWriter::new(
+                tmp.path(),
+                16,
+                64,
+                1 << 10,
+            ).unwrap();
+            let true_items = repeat(rand_items(1)[0]).take(n_items).collect::<Vec<_>>();
+
+            // Sender must be closed
+            {
+                for chunk in true_items.chunks(n_items / 8) {
+                    let mut sender = manager.get_sender();
+                    for item in chunk {
+                        sender.send(*item);
+                    }
+                }
+            }
+            true_items
+        };
+
+        // Open finished file
+        let reader = ShardReader::<T1>::open(tmp.path());
+
+        let all_items = reader.iter_range(&Range::all()).collect();
+        set_compare(&true_items, &all_items);
+
+        if !(true_items == all_items) {
+            println!("true len: {:?}", true_items.len());
+            println!("round trip len: {:?}", all_items.len());
+            assert_eq!(&true_items, &all_items);
+        }
+
+        for rc in [1, 3, 8, 15, 32, 63, 128, 255, 512, 1095].iter() {
+            // Open finished file & test chunked reads
+            let set_reader = ShardReader::<T1>::open(&tmp.path());
+            let mut all_items_chunks = Vec::new();
+
+            // Read in chunks
+            let chunks = set_reader.make_chunks(*rc, &Range::all());
+            assert_eq!(1, chunks.len());
+            for c in chunks {
+                let itr = set_reader.iter_range(&c);
+                all_items_chunks.extend(itr);
+            }
+            assert_eq!(&true_items, &all_items_chunks);
+        }
     }
 
     fn check_round_trip(
