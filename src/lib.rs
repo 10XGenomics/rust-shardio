@@ -84,6 +84,7 @@ use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::path::Path;
@@ -1130,15 +1131,15 @@ where
         assert!(num_chunks > 0);
 
         // Enumerate all the in-range known start locations in the dataset
-        let mut starts = Vec::new();
+        let mut starts = BTreeSet::new();
         for r in &self.readers {
             for block in &r.index {
                 if range.contains(&block.start_key) {
-                    starts.push(block.start_key.clone());
+                    starts.insert(block.start_key.clone());
                 }
             }
         }
-        starts.sort();
+        let starts = starts.into_iter().collect::<Vec<_>>();
 
         // Divide the known start locations into chunks, and
         // use setup start positions.
@@ -1182,6 +1183,7 @@ mod shard_tests {
     use std::fmt::Debug;
     use std::hash::Hash;
     use std::iter::FromIterator;
+    use std::u8;
     use tempfile;
 
     #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord, Hash)]
@@ -1416,10 +1418,11 @@ mod shard_tests {
             let set_reader = ShardReader::<T1, FieldDSort>::open(tmp.path());
             let mut all_items_chunks = Vec::new();
 
-            for rc in &[1, 4, 7, 12, 15, 21, 65] {
+            for rc in &[1, 4, 7, 12, 15, 21, 65, 8192] {
                 all_items_chunks.clear();
                 let chunks = set_reader.make_chunks(*rc, &Range::all());
                 assert!(chunks.len() <= *rc, "chunks > req: ({} > {})", chunks.len(), *rc);
+                assert!(chunks.len() <= u8::max_value() as usize, "chunks > |T1.d| ({} > {})", chunks.len(), u8::max_value());
                 for c in chunks {
                     let itr = set_reader.iter_range(&c);
                     all_items_chunks.extend(itr);
