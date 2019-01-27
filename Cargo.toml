@@ -19,7 +19,7 @@ flate2 = "*"
 lz4 = { version = "*", optional = true }
 rayon = "*"
 crossbeam-channel = "0.1.2"
-failure = "0.1.1"
+failure = "0.1.5"
 failure_derive = "*"
 pretty_assertions = "0.5.1"
 min-max-heap = "1.0.2"
