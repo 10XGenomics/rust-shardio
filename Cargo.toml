@@ -1,10 +1,9 @@
 [package]
 name = "shardio"
-version = "0.4.0"
-authors = ["Patrick Marks <patrick@10xgenomics.com>"]
+version = "0.5.0"
+authors = ["Patrick Marks <patrick@10xgenomics.com>", "Sreenath Krishnan <sreenath.krishnan@10xgenomics.com>", "Lance Hepler <lance.hepler@10xgenomics.com>"]
 
 [features]
-default = ['lz4']
 # Switch on the 'full-test' feature (in release mode), to enable 
 # some long-running stress-tests
 full-test = []
@@ -15,8 +14,7 @@ serde_derive = "*"
 bincode = ">=1.0"
 byteorder = "*"
 libc = "*"
-flate2 = "*"
-lz4 = { version = "*", optional = true }
+lz4 = "*"
 rayon = "*"
 crossbeam-channel = "0.1.2"
 failure = "0.1.5"

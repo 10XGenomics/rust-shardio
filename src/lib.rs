@@ -1,8 +1,8 @@
 // Copyright (c) 2018 10x Genomics, Inc. All rights reserved.
 
-//! Efficiently write Rust structs to shard files from multiple threads.
-//! You can process different subsets of your data in different threads, different processes.
-//! When reading shardio will merge the data on the fly into a single sorted view.
+//! Serialize large streams of `Serialize`-able structs to disk from multiple threads, with a customizable on-disk sort order.
+//! Data is written to sorted chunks. When reading shardio will merge the data on the fly into a single sorted view. You can 
+//! also procss disjoint subsets of sorted data.
 //!
 //! ```rust
 //! #[macro_use]
@@ -15,7 +15,7 @@
 //! use failure::Error;
 //!
 //! #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, PartialOrd, Ord, Debug)]
-//! struct Test {
+//! struct DataStruct {
 //!     a: u64,
 //!     b: u32,
 //! }
@@ -25,31 +25,39 @@
 //!     let filename = "test.shardio";
 //!     {
 //!         // Open a shardio output file
-//!         // Parameters here  buffering, and the size of disk chunks
+//!         // Parameters here control buffering, and the size of disk chunks
 //!         // which affect how many disk chunks need to be read to
 //!         // satisfy a range query when reading.
-//!         let manager: ShardWriter<Test> =
+//!         // In this example the 'built-in' sort order given by #[derive(Ord)]
+//!         // is used.
+//!         let mut writer: ShardWriter<DataStruct> =
 //!             ShardWriter::new(filename, 64, 256, 1<<16)?;
 //!
 //!         // Get a handle to send data to the file
-//!         let mut sender = manager.get_sender();
+//!         let mut sender = writer.get_sender();
 //!
 //!         // Generate some test data
 //!         for i in 0..(2 << 16) {
-//!             sender.send(Test { a: (i%25) as u64, b: (i%100) as u32 });
+//!             sender.send(DataStruct { a: (i%25) as u64, b: (i%100) as u32 });
 //!         }
 //! 
-//!         // Write errors are only accessible by calling
+//!         // Write errors are accessible by calling the finish() method
+//!         writer.finish()?;
 //!     }
 //!
 //!     // Open finished file & test chunked reads
-//!     let reader = ShardReader::<Test>::open(filename)?;
+//!     let reader = ShardReader::<DataStruct>::open(filename)?;
 //!
-//!     // Read back data
+//!     
 //!     let mut all_items = Vec::new();
 //!
+//!     // Shardio will divide the key space into 5 roughly equally sized chunks.
+//!     // These chunks can be processed serially, in parallel in different threads,
+//!     // or on different machines.
 //!     let chunks = reader.make_chunks(5, &Range::all());
+//!
 //!     for c in chunks {
+//!         // Iterate over all the data in chunk c.
 //!         let mut range_iter = reader.iter_range(&c)?;
 //!         for i in range_iter {
 //!             all_items.push(i?);
@@ -78,10 +86,8 @@ extern crate serde;
 #[macro_use]
 extern crate failure;
 extern crate crossbeam_channel;
-extern crate flate2;
 extern crate min_max_heap;
 
-#[cfg(feature = "lz4")]
 extern crate lz4;
 
 #[cfg(test)]
@@ -152,6 +158,7 @@ fn read_at(fd: &RawFd, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
     Ok(total)
 }
 
+// Some helper code for injecting IO errors. Use for testing error handling
 //use std::cell::RefCell;
 //thread_local! {
 //    pub static WRITES: RefCell<u32> = RefCell::new(1);
@@ -161,6 +168,7 @@ fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> io::Result<usize> {
     let mut total = 0usize;
 
     while total < buf.len() {
+        // Helper code for injecting IO errors. Use for testing error handling.
         //WRITES.with(|f| {
         //    *f.borrow_mut() += 1;
         //});
@@ -223,9 +231,11 @@ impl<K: Ord + Serialize> FileManager<K> {
             file,
         })
 
-        // TODO: write a magic string to the start of the file,
+        // FIXME: write a magic string to the start of the file,
         // and maybe some metadata about the types being stored and the 
         // compression scheme.
+        // FIXME: write to a TempFile that will be destroyed unless
+        // writing completes successfully.
     }
 
     // Write a chunk to the file. Chunk contains `n_items` items covering [range.0,  range.1]. Compressed data is in `data`
@@ -253,12 +263,38 @@ impl<K: Ord + Serialize> FileManager<K> {
 /// Impelment this trait to create a custom sort order.
 /// The function `sort_key` returns a `Cow` so that we abstract over Owned or
 /// Borrowed data.
+/// ```rust
+/// 
+/// extern crate shardio;
+/// use shardio::*;
+/// use std::borrow::Cow;
+/// 
+/// // The default sort order for DataStruct will be by field1.
+/// #[derive(Ord, PartialOrd, Eq, PartialEq)]
+/// struct DataStruct {
+///     field1: usize,
+///     field2: String,
+/// }
+/// 
+/// // Define a marker struct for your new sort order
+/// struct Field2SortKey;
+/// 
+/// // Define the new sort key by extracting field2 from DataStruct
+/// impl SortKey<DataStruct> for Field2SortKey {
+///     type Key = String;
+/// 
+///     fn sort_key(t: &DataStruct) -> Cow<String> {
+///         Cow::Borrowed(&t.field2)
+///     }
+/// }
+/// ```
 pub trait SortKey<T> {
     type Key: Ord + Clone;
     fn sort_key(t: &T) -> Cow<Self::Key>;
 }
 
-/// Marker struct for sorting types that implement `Ord` in their 'natural' order.
+/// Marker struct for sorting types that implement `Ord` in the order defined by their `Ord` impl.
+/// This sort order is used by default when writing, unless an alternative sort order is provided.
 pub struct DefaultSort;
 impl<T> SortKey<T> for DefaultSort
 where
@@ -270,11 +306,14 @@ where
     }
 }
 
-/// Write a stream data items of type `T` to disk.
+/// Write a stream data items of type `T` to disk, in the sort order defined by `S`.
 ///
-/// Data is buffered up to `item_buffer_size` items, then sorted, block compressed and written to disk. When the ShardWriter is dropped, it will
-/// flush remaining items to disk, write the inded and close the file.  NOTE: you may loose data if you don't close shutdown ShardSenders
-/// prior to dropping the ShardWriter.
+/// Data is buffered up to `item_buffer_size` items, then sorted, block compressed and written to disk. 
+/// When the ShardWriter is dropped or has `finish()` called on it, it will
+/// flush remaining items to disk, write an index of the chunk data and close the file.
+/// 
+/// The `get_sender()` methods returns a `ShardSender` that must be used to send items to the writer.
+/// You must close each ShardSender by calling its `finish()` method, or data may be lost.
 ///
 /// # Sorting
 /// Items are sorted according to the `Ord` implementation of type `S::Key`. Type `S`, implementing the `SortKey` trait
@@ -289,7 +328,7 @@ pub struct ShardWriter<T, S = DefaultSort> {
 
 struct ShardWriterHelper<T> {
     tx: Sender<Option<Vec<T>>>,
-    buffer_thread: Option<JoinHandle<()>>,
+    buffer_thread: Option<JoinHandle<Result<(), Error>>>,
     writer_thread: Option<JoinHandle<Result<usize, Error>>>,
 }
 
@@ -401,7 +440,7 @@ fn convert_thread_panic<T>(thread_result: thread::Result<Result<T, Error>>) -> R
 impl<T, S> Drop for ShardWriter<T, S> {
     fn drop(&mut self) {
         if !self.closed {
-            self.helper.tx.send(None).unwrap();
+            let _ = self.helper.tx.send(None);
             self.helper.buffer_thread.take().map(|x| x.join());
             self.helper.writer_thread.take().map(|x| x.join());
         }
@@ -446,7 +485,7 @@ where
 
     // Add new items to the buffer, send full buffers to the
     // writer thread.
-    fn process(&mut self) {
+    fn process(&mut self) -> Result<(), Error> {
         let mut buf = Vec::with_capacity(self.buffer_size);
 
         loop {
@@ -454,35 +493,41 @@ where
                 Ok(Some(v)) => {
                     buf.extend(v);
                     if buf.len() + self.chunk_size > self.buffer_size {
-                        buf = self.send_buf(buf, false);
+                        buf = self.send_buf(buf, false)?;
                     }
                 }
                 Ok(None) => {
-                    self.send_buf(buf, true);
+                    self.send_buf(buf, true)?;
                     break;
                 }
                 Err(_) => break,
             }
         }
+
+        Ok(())
     }
 
-    fn send_buf(&mut self, buf: Vec<T>, done: bool) -> Vec<T> {
+    fn send_buf(&mut self, buf: Vec<T>, done: bool) -> Result<Vec<T>, Error> {
         let r = self.buf_rx.try_recv();
-        let _ = self.buf_tx.send((buf, done));
+        let sent = self.buf_tx.send((buf, done));
+        if sent.is_err() {
+            return Err(format_err!("writer thread shut down, see ShardWriterThread.finish() for error"));
+        }
 
         match r {
-            Ok(r) => return r,
+            Ok(r) => return Ok(r),
             Err(_) => (),
         };
 
         if !self.second_buf {
             self.second_buf = true;
-            Vec::with_capacity(self.buffer_size)
+            Ok(Vec::with_capacity(self.buffer_size))
         } else if !done {
-            self.buf_rx.recv().unwrap()
+            let return_buf = self.buf_rx.recv()?;
+            Ok(return_buf)
         } else {
             assert!(done, "had to make 3rd buffer when not done");
-            Vec::new()
+            Ok(Vec::new())
         }
     }
 }
@@ -558,17 +603,9 @@ where
         Ok(n_items)
     }
 
-    #[cfg(feature = "lz4")]
     fn get_encoder(buffer: &mut Vec<u8>) -> Result<lz4::Encoder<&mut Vec<u8>>, Error> {
         let buf = lz4::EncoderBuilder::new().build(buffer)?;
         Ok(buf)
-    }
-
-    #[cfg(not(feature = "lz4"))]
-    fn get_encoder(buffer: &mut Vec<u8>) -> flate2::write::ZlibEncoder<&mut Vec<u8>> {
-        use flate2::write::ZlibEncoder;
-        use flate2::Compression;
-        ZlibEncoder::new(buffer, Compression::Fast).unwrap()
     }
 
     fn write_chunk(&mut self, items: &[T]) -> Result<usize, Error> {
@@ -645,7 +682,7 @@ impl<T: Send> ShardSender<T> {
     }
 
     /// Send an item to the shard file
-    pub fn send(&mut self, item: T) {
+    pub fn send(&mut self, item: T) -> Result<(), Error> {
         let send = {
             self.buffer.push(item);
             self.buffer.len() == self.buf_size
@@ -654,8 +691,13 @@ impl<T: Send> ShardSender<T> {
         if send {
             let mut send_buf = Vec::with_capacity(self.buf_size);
             std::mem::swap(&mut send_buf, &mut self.buffer);
-            self.tx.send(Some(send_buf)).unwrap();
+            let e = self.tx.send(Some(send_buf));
+            if e.is_err() {
+                return Err(format_err!("ShardWriter failed. See ShardWriter.finish() for underlying error"));
+            }
         }
+
+        Ok(())
     }
 
     /// Signal that you've finished sending items to this `ShardSender`. `finished` will called
@@ -729,16 +771,8 @@ where
         Ok(deserialize_from(file)?)
     }
 
-    #[cfg(feature = "lz4")]
     fn get_decoder(buffer: &mut Vec<u8>) -> lz4::Decoder<&[u8]> {
         lz4::Decoder::new(buffer.as_slice()).unwrap()
-    }
-
-    #[cfg(not(feature = "lz4"))]
-    fn get_decoder(buffer: &mut Vec<u8>) -> flate2::read::ZlibDecoder<&[u8]> {
-        use flate2::write::ZlibEncoder;
-        use flate2::Compression;
-        ZlibDecoder::new(buffer.as_slice())
     }
 
     pub fn read_range(&self, range: &Range<<S as SortKey<T>>::Key>, data: &mut Vec<T>, buf: &mut Vec<u8>) -> Result<(), Error> {
@@ -1409,7 +1443,7 @@ mod shard_tests {
                 for chunk in true_items.chunks(n_items / 8) {
                     let mut sender = manager.get_sender();
                     for item in chunk {
-                        sender.send(*item);
+                        sender.send(*item)?;
                     }
                 }
             }
@@ -1468,12 +1502,12 @@ mod shard_tests {
 
         // Write and close file
         let true_items = {
-            let manager: ShardWriter<T1, FieldDSort> = ShardWriter::new(
+            let mut manager: ShardWriter<T1, FieldDSort> = ShardWriter::new(
                 tmp.path(),
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
-            ).unwrap();
+            )?;
             let mut true_items = rand_items(n_items);
 
             // Sender must be closed
@@ -1481,10 +1515,12 @@ mod shard_tests {
                 for chunk in true_items.chunks(n_items / 8) {
                     let mut sender = manager.get_sender();
                     for item in chunk {
-                        sender.send(*item);
+                        sender.send(*item)?;
                     }
                 }
             }
+            manager.finish()?;
+
             true_items.sort_by_key(|x| x.d);
             true_items
         };

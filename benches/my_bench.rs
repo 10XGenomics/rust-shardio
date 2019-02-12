@@ -64,17 +64,17 @@ fn main() {
         producer_chunk_size: usize,
         buffer_size: usize,
         n_items: usize,
-    ) {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
+    ) -> Result<(), Error> {
+        let tmp = tempfile::NamedTempFile::new()?;
 
         // Write and close file
         let true_items = {
-            let manager: ShardWriter<T1, T1> = ShardWriter::new(
+            let manager: ShardWriter<T1> = ShardWriter::new(
                 tmp.path(),
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
-            ).unwrap();
+            )?;
             let mut true_items = Vec::new();
 
             // Sender must be closed
@@ -97,7 +97,7 @@ fn main() {
         };
 
         // Open finished file
-        let reader = ShardReader::<T1, T1>::open(tmp.path());
+        let reader = ShardReader::<T1>::open(tmp.path())?;
 
         let mut all_items = Vec::new();
         reader.read_range(&Range::all(), &mut all_items);
@@ -107,6 +107,8 @@ fn main() {
             println!("round trip len: {:?}", all_items.len());
             assert!(false);
         }
+
+        Ok(())
     }
 
     fn test_shard_round_trip_big() {
@@ -206,5 +208,4 @@ fn main() {
         );
     //criterion_group!(benches, criterion_benchmark);
     //criterion_main!(benches);
-    ()
 }
