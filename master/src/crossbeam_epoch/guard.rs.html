@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `/home/travis/.cargo/registry/src/github.com-1ecc6299db9ec823/crossbeam-epoch-0.4.3/src/guard.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>guard.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `/home/travis/.cargo/registry/src/github.com-1ecc6299db9ec823/crossbeam-epoch-0.3.1/src/guard.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>guard.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
 <span id="4">  4</span>
@@ -415,41 +415,12 @@
 <span id="415">415</span>
 <span id="416">416</span>
 <span id="417">417</span>
-<span id="418">418</span>
-<span id="419">419</span>
-<span id="420">420</span>
-<span id="421">421</span>
-<span id="422">422</span>
-<span id="423">423</span>
-<span id="424">424</span>
-<span id="425">425</span>
-<span id="426">426</span>
-<span id="427">427</span>
-<span id="428">428</span>
-<span id="429">429</span>
-<span id="430">430</span>
-<span id="431">431</span>
-<span id="432">432</span>
-<span id="433">433</span>
-<span id="434">434</span>
-<span id="435">435</span>
-<span id="436">436</span>
-<span id="437">437</span>
-<span id="438">438</span>
-<span id="439">439</span>
-<span id="440">440</span>
-<span id="441">441</span>
-<span id="442">442</span>
-<span id="443">443</span>
-<span id="444">444</span>
-</pre><pre class="rust ">
-<span class="kw">use</span> <span class="ident">core</span>::<span class="ident">fmt</span>;
+</pre><div class="example-wrap"><pre class="rust ">
 <span class="kw">use</span> <span class="ident">core</span>::<span class="ident">ptr</span>;
 <span class="kw">use</span> <span class="ident">core</span>::<span class="ident">mem</span>;
 
-<span class="kw">use</span> <span class="ident">deferred</span>::<span class="ident">Deferred</span>;
+<span class="kw">use</span> <span class="ident">garbage</span>::<span class="ident">Garbage</span>;
 <span class="kw">use</span> <span class="ident">internal</span>::<span class="ident">Local</span>;
-<span class="kw">use</span> <span class="ident">collector</span>::<span class="ident">Collector</span>;
 
 <span class="doccomment">/// A guard that keeps the current thread pinned.</span>
 <span class="doccomment">///</span>
@@ -520,10 +491,26 @@
 <span class="doccomment">///</span>
 <span class="doccomment">/// [`pin`]: fn.pin.html</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Guard</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">local</span>: <span class="kw-2">*</span><span class="kw">const</span> <span class="ident">Local</span>,
+    <span class="ident">local</span>: <span class="kw-2">*</span><span class="kw">const</span> <span class="ident">Local</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">Guard</span> {
+    <span class="doccomment">/// Creates a new guard from a pointer to `Local`.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Safety</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// The `local` should be a valid pointer created by `Local::register()`.</span>
+    <span class="attribute">#[<span class="ident">doc</span>(<span class="ident">hidden</span>)]</span>
+    <span class="kw">pub</span> <span class="kw">unsafe</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">local</span>: <span class="kw-2">*</span><span class="kw">const</span> <span class="ident">Local</span>) <span class="op">-&gt;</span> <span class="ident">Guard</span> {
+        <span class="ident">Guard</span> { <span class="ident">local</span>: <span class="ident">local</span> }
+    }
+
+    <span class="doccomment">/// Accesses the internal pointer to `Local`.</span>
+    <span class="attribute">#[<span class="ident">doc</span>(<span class="ident">hidden</span>)]</span>
+    <span class="kw">pub</span> <span class="kw">unsafe</span> <span class="kw">fn</span> <span class="ident">get_local</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-&gt;</span> <span class="kw-2">*</span><span class="kw">const</span> <span class="ident">Local</span> {
+        <span class="self">self</span>.<span class="ident">local</span>
+    }
+
     <span class="doccomment">/// Stores a function so that it can be executed at some point after all currently pinned</span>
     <span class="doccomment">/// threads get unpinned.</span>
     <span class="doccomment">///</span>
@@ -558,29 +545,16 @@
     <span class="doccomment">/// }</span>
     <span class="doccomment">/// ```</span>
     <span class="doccomment">///</span>
-    <span class="doccomment">/// Apart from that, keep in mind that another thread may execute `f`, so anything accessed by</span>
-    <span class="doccomment">/// the closure must be `Send`.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// We intentionally didn&#39;t require `F: Send`, because Rust&#39;s type systems usually cannot prove</span>
-    <span class="doccomment">/// `F: Send` for typical use cases. For example, consider the following code snippet, which</span>
-    <span class="doccomment">/// exemplifies the typical use case of deferring the deallocation of a shared reference:</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// ```ignore</span>
-    <span class="doccomment">/// let shared = Owned::new(7i32).into_shared(guard);</span>
-    <span class="doccomment">/// guard.defer(Deferred::new(move || shared.into_owned())); // `Shared` is not `Send`!</span>
-    <span class="doccomment">/// ```</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// While `Shared` is not `Send`, it&#39;s safe for another thread to call the deferred function,</span>
-    <span class="doccomment">/// because it&#39;s called only after the grace period and `shared` is no longer shared with other</span>
-    <span class="doccomment">/// threads. But we don&#39;t expect type systems to prove this.</span>
+    <span class="doccomment">/// Apart from that, keep in mind that another thread may execute `f`, so anything accessed</span>
+    <span class="doccomment">/// by the closure must be `Send`.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// # Examples</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// When a heap-allocated object in a data structure becomes unreachable, it has to be</span>
     <span class="doccomment">/// deallocated. However, the current thread and other threads may be still holding references</span>
-    <span class="doccomment">/// on the stack to that same object. Therefore it cannot be deallocated before those references</span>
-    <span class="doccomment">/// get dropped. This method can defer deallocation until all those threads get unpinned and</span>
-    <span class="doccomment">/// consequently drop all their references on the stack.</span>
+    <span class="doccomment">/// on the stack to that same object. Therefore it cannot be deallocated before those</span>
+    <span class="doccomment">/// references get dropped. This method can defer deallocation until all those threads get</span>
+    <span class="doccomment">/// unpinned and consequently drop all their references on the stack.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// ```rust</span>
     <span class="doccomment">/// use crossbeam_epoch::{self as epoch, Atomic, Owned};</span>
@@ -617,8 +591,10 @@
     <span class="kw">where</span>
         <span class="ident">F</span>: <span class="ident">FnOnce</span>() <span class="op">-&gt;</span> <span class="ident">R</span>,
     {
+        <span class="kw">let</span> <span class="ident">garbage</span> <span class="op">=</span> <span class="ident">Garbage</span>::<span class="ident">new</span>(<span class="op">||</span> <span class="ident">drop</span>(<span class="ident">f</span>()));
+
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">local</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">local</span>.<span class="ident">as_ref</span>() {
-            <span class="ident">local</span>.<span class="ident">defer</span>(<span class="ident">Deferred</span>::<span class="ident">new</span>(<span class="kw">move</span> <span class="op">||</span> <span class="ident">drop</span>(<span class="ident">f</span>())), <span class="self">self</span>);
+            <span class="ident">local</span>.<span class="ident">defer</span>(<span class="ident">garbage</span>, <span class="self">self</span>);
         }
     }
 
@@ -742,28 +718,6 @@
 
         <span class="ident">f</span>()
     }
-
-    <span class="doccomment">/// Returns the `Collector` associated with this guard.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// This method is useful when you need to ensure that all guards used with</span>
-    <span class="doccomment">/// a data structure come from the same collector.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// If this method is called from an [`unprotected`] guard, then `None` is returned.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// # Examples</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// ```</span>
-    <span class="doccomment">/// use crossbeam_epoch as epoch;</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// let mut guard1 = epoch::pin();</span>
-    <span class="doccomment">/// let mut guard2 = epoch::pin();</span>
-    <span class="doccomment">/// assert!(guard1.collector() == guard2.collector());</span>
-    <span class="doccomment">/// ```</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// [`unprotected`]: fn.unprotected.html</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">collector</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) <span class="op">-&gt;</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Collector</span><span class="op">&gt;</span> {
-        <span class="kw">unsafe</span> { <span class="self">self</span>.<span class="ident">local</span>.<span class="ident">as_ref</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">local</span><span class="op">|</span> <span class="ident">local</span>.<span class="ident">collector</span>()) }
-    }
 }
 
 <span class="kw">impl</span> <span class="ident">Drop</span> <span class="kw">for</span> <span class="ident">Guard</span> {
@@ -782,12 +736,6 @@
             <span class="prelude-val">None</span> <span class="op">=&gt;</span> <span class="ident">Guard</span> { <span class="ident">local</span>: <span class="ident">ptr</span>::<span class="ident">null</span>() },
             <span class="prelude-val">Some</span>(<span class="ident">local</span>) <span class="op">=&gt;</span> <span class="ident">local</span>.<span class="ident">pin</span>(),
         }
-    }
-}
-
-<span class="kw">impl</span> <span class="ident">fmt</span>::<span class="ident">Debug</span> <span class="kw">for</span> <span class="ident">Guard</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">fmt</span>::<span class="ident">Formatter</span>) <span class="op">-&gt;</span> <span class="ident">fmt</span>::<span class="prelude-ty">Result</span> {
-        <span class="ident">f</span>.<span class="ident">debug_struct</span>(<span class="string">&quot;Guard&quot;</span>).<span class="ident">finish</span>()
     }
 }
 
@@ -840,19 +788,19 @@
 <span class="doccomment">///</span>
 <span class="doccomment">/// ```</span>
 <span class="doccomment">/// use crossbeam_epoch::{self as epoch, Atomic};</span>
-<span class="doccomment">/// use std::mem::ManuallyDrop;</span>
+<span class="doccomment">/// use std::ptr;</span>
 <span class="doccomment">/// use std::sync::atomic::Ordering::Relaxed;</span>
 <span class="doccomment">///</span>
-<span class="doccomment">/// struct Stack&lt;T&gt; {</span>
-<span class="doccomment">///     head: Atomic&lt;Node&lt;T&gt;&gt;,</span>
+<span class="doccomment">/// struct Stack {</span>
+<span class="doccomment">///     head: epoch::Atomic&lt;Node&gt;,</span>
 <span class="doccomment">/// }</span>
 <span class="doccomment">///</span>
-<span class="doccomment">/// struct Node&lt;T&gt; {</span>
-<span class="doccomment">///     data: ManuallyDrop&lt;T&gt;,</span>
-<span class="doccomment">///     next: Atomic&lt;Node&lt;T&gt;&gt;,</span>
+<span class="doccomment">/// struct Node {</span>
+<span class="doccomment">///     data: u32,</span>
+<span class="doccomment">///     next: epoch::Atomic&lt;Node&gt;,</span>
 <span class="doccomment">/// }</span>
 <span class="doccomment">///</span>
-<span class="doccomment">/// impl&lt;T&gt; Drop for Stack&lt;T&gt; {</span>
+<span class="doccomment">/// impl Drop for Stack {</span>
 <span class="doccomment">///     fn drop(&amp;mut self) {</span>
 <span class="doccomment">///         unsafe {</span>
 <span class="doccomment">///             // Unprotected load.</span>
@@ -862,10 +810,8 @@
 <span class="doccomment">///                 // Unprotected load.</span>
 <span class="doccomment">///                 let next = n.next.load(Relaxed, epoch::unprotected());</span>
 <span class="doccomment">///</span>
-<span class="doccomment">///                 // Take ownership of the node, then drop its data and deallocate it.</span>
-<span class="doccomment">///                 let mut o = node.into_owned();</span>
-<span class="doccomment">///                 ManuallyDrop::drop(&amp;mut o.data);</span>
-<span class="doccomment">///                 drop(o);</span>
+<span class="doccomment">///                 // Take ownership of the node, then drop it.</span>
+<span class="doccomment">///                 drop(node.into_owned());</span>
 <span class="doccomment">///</span>
 <span class="doccomment">///                 node = next;</span>
 <span class="doccomment">///             }</span>
@@ -887,5 +833,5 @@
     <span class="kw">static</span> <span class="ident">UNPROTECTED</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">0</span>;
     <span class="kw-2">&amp;</span><span class="kw-2">*</span>(<span class="kw-2">&amp;</span><span class="ident">UNPROTECTED</span> <span class="kw">as</span> <span class="kw-2">*</span><span class="kw">const</span> <span class="kw">_</span> <span class="kw">as</span> <span class="kw-2">*</span><span class="kw">const</span> <span class="ident">Guard</span>)
 }
-</pre>
-</section><section id="search" class="content hidden"></section><section class="footer"></section><aside id="help" class="hidden"><div><h1 class="hidden">Help</h1><div class="shortcuts"><h2>Keyboard Shortcuts</h2><dl><dt><kbd>?</kbd></dt><dd>Show this help dialog</dd><dt><kbd>S</kbd></dt><dd>Focus the search field</dd><dt><kbd>↑</kbd></dt><dd>Move up in search results</dd><dt><kbd>↓</kbd></dt><dd>Move down in search results</dd><dt><kbd>↹</kbd></dt><dd>Switch tab</dd><dt><kbd>&#9166;</kbd></dt><dd>Go to active search result</dd><dt><kbd>+</kbd></dt><dd>Expand all sections</dd><dt><kbd>-</kbd></dt><dd>Collapse all sections</dd></dl></div><div class="infos"><h2>Search Tricks</h2><p>Prefix searches with a type followed by a colon (e.g. <code>fn:</code>) to restrict the search to a given type.</p><p>Accepted types are: <code>fn</code>, <code>mod</code>, <code>struct</code>, <code>enum</code>, <code>trait</code>, <code>type</code>, <code>macro</code>, and <code>const</code>.</p><p>Search functions by type signature (e.g. <code>vec -> usize</code> or <code>* -> vec</code>)</p><p>Search multiple things at once by splitting your query with comma (e.g. <code>str,u8</code> or <code>String,struct:Vec,test</code>)</p></div></div></aside><script>window.rootPath = "../../";window.currentCrate = "crossbeam_epoch";</script><script src="../../aliases.js"></script><script src="../../main.js"></script><script defer src="../../search-index.js"></script></body></html>
+</pre></div>
+</section><section id="search" class="content hidden"></section><section class="footer"></section><aside id="help" class="hidden"><div><h1 class="hidden">Help</h1><div class="shortcuts"><h2>Keyboard Shortcuts</h2><dl><dt><kbd>?</kbd></dt><dd>Show this help dialog</dd><dt><kbd>S</kbd></dt><dd>Focus the search field</dd><dt><kbd>↑</kbd></dt><dd>Move up in search results</dd><dt><kbd>↓</kbd></dt><dd>Move down in search results</dd><dt><kbd>↹</kbd></dt><dd>Switch tab</dd><dt><kbd>&#9166;</kbd></dt><dd>Go to active search result</dd><dt><kbd>+</kbd></dt><dd>Expand all sections</dd><dt><kbd>-</kbd></dt><dd>Collapse all sections</dd></dl></div><div class="infos"><h2>Search Tricks</h2><p>Prefix searches with a type followed by a colon (e.g. <code>fn:</code>) to restrict the search to a given type.</p><p>Accepted types are: <code>fn</code>, <code>mod</code>, <code>struct</code>, <code>enum</code>, <code>trait</code>, <code>type</code>, <code>macro</code>, and <code>const</code>.</p><p>Search functions by type signature (e.g. <code>vec -> usize</code> or <code>* -> vec</code>)</p><p>Search multiple things at once by splitting your query with comma (e.g. <code>str,u8</code> or <code>String,struct:Vec,test</code>)</p></div></div></aside><script>window.rootPath = "../../";window.currentCrate = "crossbeam_epoch";</script><script src="../../aliases.js"></script><script src="../../main.js"></script><script src="../../source-files.js"></script><script src="../../source-script.js"></script><script defer src="../../search-index.js"></script></body></html>

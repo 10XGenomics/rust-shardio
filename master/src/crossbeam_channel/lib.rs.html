@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `/home/travis/.cargo/registry/src/github.com-1ecc6299db9ec823/crossbeam-channel-0.1.3/src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `/home/travis/.cargo/registry/src/github.com-1ecc6299db9ec823/crossbeam-channel-0.3.8/src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
 <span id="4">  4</span>
@@ -340,39 +340,68 @@
 <span id="340">340</span>
 <span id="341">341</span>
 <span id="342">342</span>
-</pre><pre class="rust ">
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+</pre><div class="example-wrap"><pre class="rust ">
 <span class="doccomment">//! Multi-producer multi-consumer channels for message passing.</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! Channels are concurrent FIFO queues used for passing messages between threads.</span>
+<span class="doccomment">//! This crate is an alternative to [`std::sync::mpsc`] with more features and better performance.</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! Crossbeam&#39;s channels are an alternative to the [`std::sync::mpsc`] channels provided by the</span>
-<span class="doccomment">//! standard library. They are an improvement in pretty much all aspects: ergonomics, flexibility,</span>
-<span class="doccomment">//! features, performance.</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! # Types of channels</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! A channel can be constructed by calling functions [`unbounded`] and [`bounded`]. The former</span>
-<span class="doccomment">//! creates a channel of unbounded capacity (i.e. it can contain an arbitrary number of messages),</span>
-<span class="doccomment">//! while the latter creates a channel of bounded capacity (i.e. there is a limit to how many</span>
-<span class="doccomment">//! messages it can hold at a time).</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! Both constructors returns a pair of two values: a sender and a receiver. Senders and receivers</span>
-<span class="doccomment">//! represent two opposite sides of a channel. Messages are sent using senders and received using</span>
-<span class="doccomment">//! receivers.</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! Creating an unbounded channel:</span>
+<span class="doccomment">//! # Hello, world!</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//! use crossbeam_channel::unbounded;</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // Create an unbounded channel.</span>
-<span class="doccomment">//! let (tx, rx) = unbounded();</span>
+<span class="doccomment">//! // Create a channel of unbounded capacity.</span>
+<span class="doccomment">//! let (s, r) = unbounded();</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // Can send an arbitrarily large number of messages.</span>
-<span class="doccomment">//! for i in 0..1000 {</span>
-<span class="doccomment">//!     tx.try_send(i).unwrap();</span>
-<span class="doccomment">//! }</span>
+<span class="doccomment">//! // Send a message into the channel.</span>
+<span class="doccomment">//! s.send(&quot;Hello, world!&quot;).unwrap();</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // Receive the message from the channel.</span>
+<span class="doccomment">//! assert_eq!(r.recv(), Ok(&quot;Hello, world!&quot;));</span>
 <span class="doccomment">//! ```</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! # Channel types</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! Channels can be created using two functions:</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! * [`bounded`] creates a channel of bounded capacity, i.e. there is a limit to how many messages</span>
+<span class="doccomment">//!   it can hold at a time.</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! * [`unbounded`] creates a channel of unbounded capacity, i.e. it can hold any number of</span>
+<span class="doccomment">//!   messages at a time.</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! Both functions return a [`Sender`] and a [`Receiver`], which represent the two opposite sides</span>
+<span class="doccomment">//! of a channel.</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! Creating a bounded channel:</span>
 <span class="doccomment">//!</span>
@@ -380,308 +409,339 @@
 <span class="doccomment">//! use crossbeam_channel::bounded;</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! // Create a channel that can hold at most 5 messages at a time.</span>
-<span class="doccomment">//! let (tx, rx) = bounded(5);</span>
+<span class="doccomment">//! let (s, r) = bounded(5);</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // Can send only 5 messages.</span>
+<span class="doccomment">//! // Can send only 5 messages without blocking.</span>
 <span class="doccomment">//! for i in 0..5 {</span>
-<span class="doccomment">//!     tx.try_send(i).unwrap();</span>
+<span class="doccomment">//!     s.send(i).unwrap();</span>
 <span class="doccomment">//! }</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // An attempt to send one more message will fail.</span>
-<span class="doccomment">//! assert!(tx.try_send(5).is_err());</span>
+<span class="doccomment">//! // Another call to `send` would block because the channel is full.</span>
+<span class="doccomment">//! // s.send(5).unwrap();</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! An interesting special case is a bounded, zero-capacity channel. This kind of channel cannot</span>
-<span class="doccomment">//! hold any messages at all! In order to send a message through the channel, another thread must</span>
-<span class="doccomment">//! be waiting at the other end of it at the same time:</span>
+<span class="doccomment">//! Creating an unbounded channel:</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! ```</span>
+<span class="doccomment">//! use crossbeam_channel::unbounded;</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // Create an unbounded channel.</span>
+<span class="doccomment">//! let (s, r) = unbounded();</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // Can send any number of messages into the channel without blocking.</span>
+<span class="doccomment">//! for i in 0..1000 {</span>
+<span class="doccomment">//!     s.send(i).unwrap();</span>
+<span class="doccomment">//! }</span>
+<span class="doccomment">//! ```</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! A special case is zero-capacity channel, which cannot hold any messages. Instead, send and</span>
+<span class="doccomment">//! receive operations must appear at the same time in order to pair up and pass the message over:</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! ```</span>
+<span class="doccomment">//! use std::thread;</span>
 <span class="doccomment">//! use crossbeam_channel::bounded;</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! use std::thread;</span>
-<span class="doccomment">//!</span>
 <span class="doccomment">//! // Create a zero-capacity channel.</span>
-<span class="doccomment">//! let (tx, rx) = bounded(0);</span>
+<span class="doccomment">//! let (s, r) = bounded(0);</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // Spawn a thread that sends a message into the channel.</span>
-<span class="doccomment">//! thread::spawn(move || tx.send(&quot;Hi!&quot;).unwrap());</span>
+<span class="doccomment">//! // Sending blocks until a receive operation appears on the other side.</span>
+<span class="doccomment">//! thread::spawn(move || s.send(&quot;Hi!&quot;).unwrap());</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // Receive the message.</span>
-<span class="doccomment">//! assert_eq!(rx.recv(), Ok(&quot;Hi!&quot;));</span>
+<span class="doccomment">//! // Receiving blocks until a send operation appears on the other side.</span>
+<span class="doccomment">//! assert_eq!(r.recv(), Ok(&quot;Hi!&quot;));</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! # Sharing channels</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! Senders and receivers can be either shared by reference or cloned and then sent to other</span>
-<span class="doccomment">//! threads. Feel free to use any of these two approaches as you like.</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! Sharing by reference:</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! ```</span>
-<span class="doccomment">//! extern crate crossbeam_channel;</span>
-<span class="doccomment">//! extern crate crossbeam_utils;</span>
-<span class="doccomment">//! # fn main() {</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! use crossbeam_channel::unbounded;</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! let (tx, rx) = unbounded();</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! crossbeam_utils::scoped::scope(|s| {</span>
-<span class="doccomment">//!     // Spawn a thread that sends one message and then receives one.</span>
-<span class="doccomment">//!     s.spawn(|| {</span>
-<span class="doccomment">//!         tx.send(1).unwrap();</span>
-<span class="doccomment">//!         rx.recv().unwrap();</span>
-<span class="doccomment">//!     });</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//!     // Spawn another thread that does the same thing.</span>
-<span class="doccomment">//!     // Both closures capture `tx` and `rx` by reference.</span>
-<span class="doccomment">//!     s.spawn(|| {</span>
-<span class="doccomment">//!         tx.send(2).unwrap();</span>
-<span class="doccomment">//!         rx.recv().unwrap();</span>
-<span class="doccomment">//!     });</span>
-<span class="doccomment">//! });</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! # }</span>
-<span class="doccomment">//! ```</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! Sharing by sending:</span>
+<span class="doccomment">//! Senders and receivers can be cloned and sent to other threads:</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//! use std::thread;</span>
+<span class="doccomment">//! use crossbeam_channel::bounded;</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! let (s1, r1) = bounded(0);</span>
+<span class="doccomment">//! let (s2, r2) = (s1.clone(), r1.clone());</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // Spawn a thread that receives a message and then sends one.</span>
+<span class="doccomment">//! thread::spawn(move || {</span>
+<span class="doccomment">//!     r2.recv().unwrap();</span>
+<span class="doccomment">//!     s2.send(2).unwrap();</span>
+<span class="doccomment">//! });</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // Send a message and then receive one.</span>
+<span class="doccomment">//! s1.send(1).unwrap();</span>
+<span class="doccomment">//! r1.recv().unwrap();</span>
+<span class="doccomment">//! ```</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! Note that cloning only creates a new handle to the same sending or receiving side. It does not</span>
+<span class="doccomment">//! create a separate stream of messages in any way:</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! ```</span>
 <span class="doccomment">//! use crossbeam_channel::unbounded;</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! let (tx, rx) = unbounded();</span>
-<span class="doccomment">//! let (tx2, rx2) = (tx.clone(), rx.clone());</span>
+<span class="doccomment">//! let (s1, r1) = unbounded();</span>
+<span class="doccomment">//! let (s2, r2) = (s1.clone(), r1.clone());</span>
+<span class="doccomment">//! let (s3, r3) = (s2.clone(), r2.clone());</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // Spawn a thread that sends one message and then receives one.</span>
-<span class="doccomment">//! // Here, `tx` and `rx` are moved into the closure (sent into the thread).</span>
-<span class="doccomment">//! thread::spawn(move || {</span>
-<span class="doccomment">//!     tx.send(1).unwrap();</span>
-<span class="doccomment">//!     rx.recv().unwrap();</span>
-<span class="doccomment">//! });</span>
+<span class="doccomment">//! s1.send(10).unwrap();</span>
+<span class="doccomment">//! s2.send(20).unwrap();</span>
+<span class="doccomment">//! s3.send(30).unwrap();</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // Spawn another thread that does the same thing.</span>
-<span class="doccomment">//! // Here, `tx2` and `rx2` are moved into the closure (sent into the thread).</span>
-<span class="doccomment">//! thread::spawn(move || {</span>
-<span class="doccomment">//!     tx2.send(2).unwrap();</span>
-<span class="doccomment">//!     rx2.recv().unwrap();</span>
-<span class="doccomment">//! });</span>
+<span class="doccomment">//! assert_eq!(r3.recv(), Ok(10));</span>
+<span class="doccomment">//! assert_eq!(r1.recv(), Ok(20));</span>
+<span class="doccomment">//! assert_eq!(r2.recv(), Ok(30));</span>
+<span class="doccomment">//! ```</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! It&#39;s also possible to share senders and receivers by reference:</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! ```</span>
+<span class="doccomment">//! # extern crate crossbeam_channel;</span>
+<span class="doccomment">//! # extern crate crossbeam_utils;</span>
+<span class="doccomment">//! # fn main() {</span>
+<span class="doccomment">//! use std::thread;</span>
+<span class="doccomment">//! use crossbeam_channel::bounded;</span>
+<span class="doccomment">//! use crossbeam_utils::thread::scope;</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! let (s, r) = bounded(0);</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! scope(|scope| {</span>
+<span class="doccomment">//!     // Spawn a thread that receives a message and then sends one.</span>
+<span class="doccomment">//!     scope.spawn(|_| {</span>
+<span class="doccomment">//!         r.recv().unwrap();</span>
+<span class="doccomment">//!         s.send(2).unwrap();</span>
+<span class="doccomment">//!     });</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//!     // Send a message and then receive one.</span>
+<span class="doccomment">//!     s.send(1).unwrap();</span>
+<span class="doccomment">//!     r.recv().unwrap();</span>
+<span class="doccomment">//! }).unwrap();</span>
+<span class="doccomment">//! # }</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! # Disconnection</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! As soon as all senders or all receivers associated with a channel are dropped, it becomes</span>
-<span class="doccomment">//! disconnected. Messages cannot be sent into a disconnected channel anymore, but the remaining</span>
-<span class="doccomment">//! messages can still be received.</span>
+<span class="doccomment">//! When all senders or all receivers associated with a channel get dropped, the channel becomes</span>
+<span class="doccomment">//! disconnected. No more messages can be sent, but any remaining messages can still be received.</span>
+<span class="doccomment">//! Send and receive operations on a disconnected channel never block.</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! ```</span>
-<span class="doccomment">//! use crossbeam_channel::{unbounded, TrySendError};</span>
+<span class="doccomment">//! use crossbeam_channel::{unbounded, RecvError};</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! let (tx, rx) = unbounded();</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! // The only receiver is dropped, disconnecting the channel.</span>
-<span class="doccomment">//! drop(rx);</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! // Attempting to send a message will result in an error.</span>
-<span class="doccomment">//! assert_eq!(tx.try_send(&quot;hello&quot;), Err(TrySendError::Disconnected(&quot;hello&quot;)));</span>
-<span class="doccomment">//! ```</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! ```</span>
-<span class="doccomment">//! use crossbeam_channel::{unbounded, TryRecvError};</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! let (tx, rx) = unbounded();</span>
-<span class="doccomment">//! tx.try_send(1).unwrap();</span>
-<span class="doccomment">//! tx.try_send(2).unwrap();</span>
-<span class="doccomment">//! tx.try_send(3).unwrap();</span>
+<span class="doccomment">//! let (s, r) = unbounded();</span>
+<span class="doccomment">//! s.send(1).unwrap();</span>
+<span class="doccomment">//! s.send(2).unwrap();</span>
+<span class="doccomment">//! s.send(3).unwrap();</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! // The only sender is dropped, disconnecting the channel.</span>
-<span class="doccomment">//! drop(tx);</span>
+<span class="doccomment">//! drop(s);</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! // The remaining messages can be received.</span>
-<span class="doccomment">//! assert_eq!(rx.try_recv(), Ok(1));</span>
-<span class="doccomment">//! assert_eq!(rx.try_recv(), Ok(2));</span>
-<span class="doccomment">//! assert_eq!(rx.try_recv(), Ok(3));</span>
+<span class="doccomment">//! assert_eq!(r.recv(), Ok(1));</span>
+<span class="doccomment">//! assert_eq!(r.recv(), Ok(2));</span>
+<span class="doccomment">//! assert_eq!(r.recv(), Ok(3));</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // However, attempting to receive another message will result in an error.</span>
-<span class="doccomment">//! assert_eq!(rx.try_recv(), Err(TryRecvError::Disconnected));</span>
+<span class="doccomment">//! // There are no more messages in the channel.</span>
+<span class="doccomment">//! assert!(r.is_empty());</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // Note that calling `r.recv()` does not block.</span>
+<span class="doccomment">//! // Instead, `Err(RecvError)` is returned immediately.</span>
+<span class="doccomment">//! assert_eq!(r.recv(), Err(RecvError));</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! # Blocking and non-blocking operations</span>
+<span class="doccomment">//! # Blocking operations</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! Send and receive operations come in three variants:</span>
+<span class="doccomment">//! Send and receive operations come in three flavors:</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! 1. Non-blocking: [`try_send`] and [`try_recv`].</span>
-<span class="doccomment">//! 2. Blocking: [`send`] and [`recv`].</span>
-<span class="doccomment">//! 3. Blocking with a timeout: [`send_timeout`] and [`recv_timeout`].</span>
+<span class="doccomment">//! * Non-blocking (returns immediately with success or failure).</span>
+<span class="doccomment">//! * Blocking (waits until the operation succeeds or the channel becomes disconnected).</span>
+<span class="doccomment">//! * Blocking with a timeout (blocks only for a certain duration of time).</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! The non-blocking variant attempts to perform the operation, but doesn&#39;t block the current</span>
-<span class="doccomment">//! thread on failure (e.g. if receiving a message from an empty channel).</span>
+<span class="doccomment">//! A simple example showing the difference between non-blocking and blocking operations:</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! The blocking variant will wait until the operation can be performed or the channel becomes</span>
-<span class="doccomment">//! disconnected.</span>
+<span class="doccomment">//! ```</span>
+<span class="doccomment">//! use crossbeam_channel::{bounded, RecvError, TryRecvError};</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! Blocking with a timeout does the same thing, but blocks the current thread only for a limited</span>
-<span class="doccomment">//! amount time.</span>
+<span class="doccomment">//! let (s, r) = bounded(1);</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // Send a message into the channel.</span>
+<span class="doccomment">//! s.send(&quot;foo&quot;).unwrap();</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // This call would block because the channel is full.</span>
+<span class="doccomment">//! // s.send(&quot;bar&quot;).unwrap();</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // Receive the message.</span>
+<span class="doccomment">//! assert_eq!(r.recv(), Ok(&quot;foo&quot;));</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // This call would block because the channel is empty.</span>
+<span class="doccomment">//! // r.recv();</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // Try receiving a message without blocking.</span>
+<span class="doccomment">//! assert_eq!(r.try_recv(), Err(TryRecvError::Empty));</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // Disconnect the channel.</span>
+<span class="doccomment">//! drop(s);</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! // This call doesn&#39;t block because the channel is now disconnected.</span>
+<span class="doccomment">//! assert_eq!(r.recv(), Err(RecvError));</span>
+<span class="doccomment">//! ```</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! # Iteration</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! Receivers can be turned into iterators. For example, calling [`iter`] creates an iterator that</span>
-<span class="doccomment">//! returns messages until the channel is disconnected. Note that iteration may block while waiting</span>
-<span class="doccomment">//! for the next message.</span>
+<span class="doccomment">//! Receivers can be used as iterators. For example, method [`iter`] creates an iterator that</span>
+<span class="doccomment">//! receives messages until the channel becomes empty and disconnected. Note that iteration may</span>
+<span class="doccomment">//! block waiting for next message to arrive.</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! ```</span>
+<span class="doccomment">//! use std::thread;</span>
 <span class="doccomment">//! use crossbeam_channel::unbounded;</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! let (tx, rx) = unbounded();</span>
-<span class="doccomment">//! tx.send(1).unwrap();</span>
-<span class="doccomment">//! tx.send(2).unwrap();</span>
-<span class="doccomment">//! tx.send(3).unwrap();</span>
+<span class="doccomment">//! let (s, r) = unbounded();</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // Drop the sender in order to disconnect the channel.</span>
-<span class="doccomment">//! drop(tx);</span>
+<span class="doccomment">//! thread::spawn(move || {</span>
+<span class="doccomment">//!     s.send(1).unwrap();</span>
+<span class="doccomment">//!     s.send(2).unwrap();</span>
+<span class="doccomment">//!     s.send(3).unwrap();</span>
+<span class="doccomment">//!     drop(s); // Disconnect the channel.</span>
+<span class="doccomment">//! });</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // Receive all remaining messages.</span>
-<span class="doccomment">//! let v: Vec&lt;_&gt; = rx.iter().collect();</span>
+<span class="doccomment">//! // Collect all messages from the channel.</span>
+<span class="doccomment">//! // Note that the call to `collect` blocks until the sender is dropped.</span>
+<span class="doccomment">//! let v: Vec&lt;_&gt; = r.iter().collect();</span>
+<span class="doccomment">//!</span>
 <span class="doccomment">//! assert_eq!(v, [1, 2, 3]);</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! By calling [`try_iter`] it is also possible to create an iterator that returns messages until</span>
-<span class="doccomment">//! the channel is empty. This iterator will never block the current thread.</span>
+<span class="doccomment">//! A non-blocking iterator can be created using [`try_iter`], which receives all available</span>
+<span class="doccomment">//! messages without blocking:</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//! use crossbeam_channel::unbounded;</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! let (tx, rx) = unbounded();</span>
-<span class="doccomment">//! tx.send(1).unwrap();</span>
-<span class="doccomment">//! tx.send(2).unwrap();</span>
-<span class="doccomment">//! tx.send(3).unwrap();</span>
+<span class="doccomment">//! let (s, r) = unbounded();</span>
+<span class="doccomment">//! s.send(1).unwrap();</span>
+<span class="doccomment">//! s.send(2).unwrap();</span>
+<span class="doccomment">//! s.send(3).unwrap();</span>
 <span class="doccomment">//! // No need to drop the sender.</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! // Receive all messages currently in the channel.</span>
-<span class="doccomment">//! let v: Vec&lt;_&gt; = rx.try_iter().collect();</span>
+<span class="doccomment">//! let v: Vec&lt;_&gt; = r.try_iter().collect();</span>
+<span class="doccomment">//!</span>
 <span class="doccomment">//! assert_eq!(v, [1, 2, 3]);</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! Finally, there is the [`into_iter`] method, which is equivalent to [`iter`], except it takes</span>
-<span class="doccomment">//! ownership of the receiver instead of borrowing it.</span>
-<span class="doccomment">//!</span>
 <span class="doccomment">//! # Selection</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! Selection allows you to declare a set of operations on channels and perform exactly one of</span>
-<span class="doccomment">//! them, whichever becomes ready first, possibly blocking until that happens.</span>
+<span class="doccomment">//! The [`select!`] macro allows you to define a set of channel operations, wait until any one of</span>
+<span class="doccomment">//! them becomes ready, and finally execute it. If multiple operations are ready at the same time,</span>
+<span class="doccomment">//! a random one among them is selected.</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! For example, selection can be used to receive a message from one of the two channels, blocking</span>
-<span class="doccomment">//! until a message appears on either of them:</span>
+<span class="doccomment">//! It is also possible to define a `default` case that gets executed if none of the operations are</span>
+<span class="doccomment">//! ready, either right away or for a certain duration of time.</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! An operation is considered to be ready if it doesn&#39;t have to block. Note that it is ready even</span>
+<span class="doccomment">//! when it will simply return an error because the channel is disconnected.</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! An example of receiving a message from two channels:</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//! # #[macro_use]</span>
 <span class="doccomment">//! # extern crate crossbeam_channel;</span>
 <span class="doccomment">//! # fn main() {</span>
-<span class="doccomment">//!</span>
 <span class="doccomment">//! use std::thread;</span>
+<span class="doccomment">//! use std::time::Duration;</span>
 <span class="doccomment">//! use crossbeam_channel::unbounded;</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! let (tx1, rx1) = unbounded();</span>
-<span class="doccomment">//! let (tx2, rx2) = unbounded();</span>
+<span class="doccomment">//! let (s1, r1) = unbounded();</span>
+<span class="doccomment">//! let (s2, r2) = unbounded();</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! thread::spawn(move || tx1.send(&quot;foo&quot;).unwrap());</span>
-<span class="doccomment">//! thread::spawn(move || tx2.send(&quot;bar&quot;).unwrap());</span>
+<span class="doccomment">//! thread::spawn(move || s1.send(10).unwrap());</span>
+<span class="doccomment">//! thread::spawn(move || s2.send(20).unwrap());</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! select_loop! {</span>
-<span class="doccomment">//!     recv(rx1, msg) =&gt; {</span>
-<span class="doccomment">//!         println!(&quot;Received a message from the first channel: {}&quot;, msg);</span>
-<span class="doccomment">//!     }</span>
-<span class="doccomment">//!     recv(rx2, msg) =&gt; {</span>
-<span class="doccomment">//!         println!(&quot;Received a message from the second channel: {}&quot;, msg);</span>
-<span class="doccomment">//!     }</span>
+<span class="doccomment">//! // At most one of these two receive operations will be executed.</span>
+<span class="doccomment">//! select! {</span>
+<span class="doccomment">//!     recv(r1) -&gt; msg =&gt; assert_eq!(msg, Ok(10)),</span>
+<span class="doccomment">//!     recv(r2) -&gt; msg =&gt; assert_eq!(msg, Ok(20)),</span>
+<span class="doccomment">//!     default(Duration::from_secs(1)) =&gt; println!(&quot;timed out&quot;),</span>
 <span class="doccomment">//! }</span>
-<span class="doccomment">//!</span>
 <span class="doccomment">//! # }</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! The syntax of [`select_loop!`] is very similar to the one used by `match`.</span>
+<span class="doccomment">//! If you need to select over a dynamically created list of channel operations, use [`Select`]</span>
+<span class="doccomment">//! instead. The [`select!`] macro is just a convenience wrapper around [`Select`].</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! Here is another, more complicated example of selection. Here we are selecting over two</span>
-<span class="doccomment">//! operations on the opposite ends of the same channel: a send and a receive operation.</span>
+<span class="doccomment">//! # Extra channels</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! Three functions can create special kinds of channels, all of which return just a [`Receiver`]</span>
+<span class="doccomment">//! handle:</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! * [`after`] creates a channel that delivers a single message after a certain duration of time.</span>
+<span class="doccomment">//! * [`tick`] creates a channel that delivers messages periodically.</span>
+<span class="doccomment">//! * [`never`] creates a channel that never delivers messages.</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! These channels are very efficient because messages get lazily generated on receive operations.</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! An example that prints elapsed time every 50 milliseconds for the duration of 1 second:</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! ```</span>
 <span class="doccomment">//! # #[macro_use]</span>
 <span class="doccomment">//! # extern crate crossbeam_channel;</span>
 <span class="doccomment">//! # fn main() {</span>
+<span class="doccomment">//! use std::time::{Duration, Instant};</span>
+<span class="doccomment">//! use crossbeam_channel::{after, tick};</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! use crossbeam_channel::{bounded, Sender, Receiver, Select};</span>
-<span class="doccomment">//! use std::thread;</span>
+<span class="doccomment">//! let start = Instant::now();</span>
+<span class="doccomment">//! let ticker = tick(Duration::from_millis(50));</span>
+<span class="doccomment">//! let timeout = after(Duration::from_secs(1));</span>
 <span class="doccomment">//!</span>
-<span class="doccomment">//! // Either send my name into the channel or receive someone else&#39;s, whatever happens first.</span>
-<span class="doccomment">//! fn seek&lt;&#39;a&gt;(name: &amp;&#39;a str, tx: Sender&lt;&amp;&#39;a str&gt;, rx: Receiver&lt;&amp;&#39;a str&gt;) {</span>
-<span class="doccomment">//!     select_loop! {</span>
-<span class="doccomment">//!         recv(rx, peer) =&gt; println!(&quot;{} received a message from {}.&quot;, name, peer),</span>
-<span class="doccomment">//!         send(tx, name) =&gt; {},</span>
+<span class="doccomment">//! loop {</span>
+<span class="doccomment">//!     select! {</span>
+<span class="doccomment">//!         recv(ticker) -&gt; _ =&gt; println!(&quot;elapsed: {:?}&quot;, start.elapsed()),</span>
+<span class="doccomment">//!         recv(timeout) -&gt; _ =&gt; break,</span>
 <span class="doccomment">//!     }</span>
 <span class="doccomment">//! }</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! let (tx, rx) = bounded(1); // Make room for one unmatched send.</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! // Pair up five people by exchanging messages over the channel.</span>
-<span class="doccomment">//! // Since there is an odd number of them, one person won&#39;t have its match.</span>
-<span class="doccomment">//! [&quot;Anna&quot;, &quot;Bob&quot;, &quot;Cody&quot;, &quot;Dave&quot;, &quot;Eva&quot;].iter()</span>
-<span class="doccomment">//!     .map(|name| {</span>
-<span class="doccomment">//!         let tx = tx.clone();</span>
-<span class="doccomment">//!         let rx = rx.clone();</span>
-<span class="doccomment">//!         thread::spawn(move || seek(name, tx, rx))</span>
-<span class="doccomment">//!     })</span>
-<span class="doccomment">//!     .collect::&lt;Vec&lt;_&gt;&gt;()</span>
-<span class="doccomment">//!     .into_iter()</span>
-<span class="doccomment">//!     .for_each(|t| t.join().unwrap());</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! // Let&#39;s send a message to the remaining person who doesn&#39;t have a match.</span>
-<span class="doccomment">//! if let Ok(name) = rx.try_recv() {</span>
-<span class="doccomment">//!     println!(&quot;No one received {}’s message.&quot;, name);</span>
-<span class="doccomment">//! }</span>
-<span class="doccomment">//!</span>
 <span class="doccomment">//! # }</span>
 <span class="doccomment">//! ```</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! For more details, take a look at the documentation of [`select_loop!`].</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! If you need a more powerful interface that allows selecting over a dynamic set of channel</span>
-<span class="doccomment">//! operations, use [`Select`].</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! [`std::sync::mpsc`]: https://doc.rust-lang.org/std/sync/mpsc/index.html</span>
 <span class="doccomment">//! [`unbounded`]: fn.unbounded.html</span>
 <span class="doccomment">//! [`bounded`]: fn.bounded.html</span>
-<span class="doccomment">//! [`try_send`]: struct.Sender.html#method.try_send</span>
+<span class="doccomment">//! [`after`]: fn.after.html</span>
+<span class="doccomment">//! [`tick`]: fn.tick.html</span>
+<span class="doccomment">//! [`never`]: fn.never.html</span>
 <span class="doccomment">//! [`send`]: struct.Sender.html#method.send</span>
-<span class="doccomment">//! [`send_timeout`]: struct.Sender.html#method.send_timeout</span>
-<span class="doccomment">//! [`try_recv`]: struct.Receiver.html#method.try_recv</span>
 <span class="doccomment">//! [`recv`]: struct.Receiver.html#method.recv</span>
-<span class="doccomment">//! [`recv_timeout`]: struct.Receiver.html#method.recv_timeout</span>
 <span class="doccomment">//! [`iter`]: struct.Receiver.html#method.iter</span>
 <span class="doccomment">//! [`try_iter`]: struct.Receiver.html#method.try_iter</span>
-<span class="doccomment">//! [`into_iter`]: struct.Receiver.html#method.into_iter</span>
-<span class="doccomment">//! [`select_loop!`]: macro.select_loop.html</span>
+<span class="doccomment">//! [`select!`]: macro.select.html</span>
 <span class="doccomment">//! [`Select`]: struct.Select.html</span>
+<span class="doccomment">//! [`Sender`]: struct.Sender.html</span>
+<span class="doccomment">//! [`Receiver`]: struct.Receiver.html</span>
 
-<span class="attribute">#![<span class="ident">cfg_attr</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;nightly&quot;</span>, <span class="ident">feature</span>(<span class="ident">spin_loop_hint</span>))]</span>
+<span class="attribute">#![<span class="ident">warn</span>(<span class="ident">missing_docs</span>)]</span>
+<span class="attribute">#![<span class="ident">warn</span>(<span class="ident">missing_debug_implementations</span>)]</span>
 
-<span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">crossbeam_epoch</span>;
 <span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">crossbeam_utils</span>;
-<span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">parking_lot</span>;
+<span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">smallvec</span>;
 
 <span class="kw">mod</span> <span class="ident">channel</span>;
+<span class="kw">mod</span> <span class="ident">context</span>;
+<span class="kw">mod</span> <span class="ident">counter</span>;
 <span class="kw">mod</span> <span class="ident">err</span>;
-<span class="kw">mod</span> <span class="ident">exchanger</span>;
 <span class="kw">mod</span> <span class="ident">flavors</span>;
-<span class="kw">mod</span> <span class="ident">monitor</span>;
 <span class="kw">mod</span> <span class="ident">select</span>;
+<span class="kw">mod</span> <span class="ident">select_macro</span>;
 <span class="kw">mod</span> <span class="ident">utils</span>;
+<span class="kw">mod</span> <span class="ident">waker</span>;
 
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">channel</span>::{<span class="ident">after</span>, <span class="ident">never</span>, <span class="ident">tick</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">channel</span>::{<span class="ident">bounded</span>, <span class="ident">unbounded</span>};
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">channel</span>::{<span class="ident">Receiver</span>, <span class="ident">Sender</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">channel</span>::{<span class="ident">IntoIter</span>, <span class="ident">Iter</span>, <span class="ident">TryIter</span>};
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">channel</span>::{<span class="ident">Receiver</span>, <span class="ident">Sender</span>};
+
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">select</span>::{<span class="ident">Select</span>, <span class="ident">SelectedOperation</span>};
+
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">err</span>::{<span class="ident">RecvError</span>, <span class="ident">RecvTimeoutError</span>, <span class="ident">TryRecvError</span>};
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">err</span>::{<span class="ident">ReadyTimeoutError</span>, <span class="ident">SelectTimeoutError</span>, <span class="ident">TryReadyError</span>, <span class="ident">TrySelectError</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">err</span>::{<span class="ident">SendError</span>, <span class="ident">SendTimeoutError</span>, <span class="ident">TrySendError</span>};
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">err</span>::{<span class="ident">SelectRecvError</span>, <span class="ident">SelectSendError</span>};
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">select</span>::<span class="ident">Select</span>;
-</pre>
-</section><section id="search" class="content hidden"></section><section class="footer"></section><aside id="help" class="hidden"><div><h1 class="hidden">Help</h1><div class="shortcuts"><h2>Keyboard Shortcuts</h2><dl><dt><kbd>?</kbd></dt><dd>Show this help dialog</dd><dt><kbd>S</kbd></dt><dd>Focus the search field</dd><dt><kbd>↑</kbd></dt><dd>Move up in search results</dd><dt><kbd>↓</kbd></dt><dd>Move down in search results</dd><dt><kbd>↹</kbd></dt><dd>Switch tab</dd><dt><kbd>&#9166;</kbd></dt><dd>Go to active search result</dd><dt><kbd>+</kbd></dt><dd>Expand all sections</dd><dt><kbd>-</kbd></dt><dd>Collapse all sections</dd></dl></div><div class="infos"><h2>Search Tricks</h2><p>Prefix searches with a type followed by a colon (e.g. <code>fn:</code>) to restrict the search to a given type.</p><p>Accepted types are: <code>fn</code>, <code>mod</code>, <code>struct</code>, <code>enum</code>, <code>trait</code>, <code>type</code>, <code>macro</code>, and <code>const</code>.</p><p>Search functions by type signature (e.g. <code>vec -> usize</code> or <code>* -> vec</code>)</p><p>Search multiple things at once by splitting your query with comma (e.g. <code>str,u8</code> or <code>String,struct:Vec,test</code>)</p></div></div></aside><script>window.rootPath = "../../";window.currentCrate = "crossbeam_channel";</script><script src="../../aliases.js"></script><script src="../../main.js"></script><script defer src="../../search-index.js"></script></body></html>
+</pre></div>
+</section><section id="search" class="content hidden"></section><section class="footer"></section><aside id="help" class="hidden"><div><h1 class="hidden">Help</h1><div class="shortcuts"><h2>Keyboard Shortcuts</h2><dl><dt><kbd>?</kbd></dt><dd>Show this help dialog</dd><dt><kbd>S</kbd></dt><dd>Focus the search field</dd><dt><kbd>↑</kbd></dt><dd>Move up in search results</dd><dt><kbd>↓</kbd></dt><dd>Move down in search results</dd><dt><kbd>↹</kbd></dt><dd>Switch tab</dd><dt><kbd>&#9166;</kbd></dt><dd>Go to active search result</dd><dt><kbd>+</kbd></dt><dd>Expand all sections</dd><dt><kbd>-</kbd></dt><dd>Collapse all sections</dd></dl></div><div class="infos"><h2>Search Tricks</h2><p>Prefix searches with a type followed by a colon (e.g. <code>fn:</code>) to restrict the search to a given type.</p><p>Accepted types are: <code>fn</code>, <code>mod</code>, <code>struct</code>, <code>enum</code>, <code>trait</code>, <code>type</code>, <code>macro</code>, and <code>const</code>.</p><p>Search functions by type signature (e.g. <code>vec -> usize</code> or <code>* -> vec</code>)</p><p>Search multiple things at once by splitting your query with comma (e.g. <code>str,u8</code> or <code>String,struct:Vec,test</code>)</p></div></div></aside><script>window.rootPath = "../../";window.currentCrate = "crossbeam_channel";</script><script src="../../aliases.js"></script><script src="../../main.js"></script><script src="../../source-files.js"></script><script src="../../source-script.js"></script><script defer src="../../search-index.js"></script></body></html>
