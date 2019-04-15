@@ -209,6 +209,8 @@ impl<K: Ord + Serialize> FileManager<K> {
 
     // Write a chunk to the file. Chunk contains `n_items` items covering [range.0,  range.1]. Compressed data is in `data`
     fn write_block(&mut self, range: (K, K), n_items: usize, data: &[u8]) -> Result<usize, Error> {
+        assert!(n_items > 0);
+
         let cur_offset = self.cursor;
         let reg = ShardRecord {
             offset: self.cursor,
@@ -550,7 +552,9 @@ where
             S::sort_key(&items[items.len() - 1]).into_owned(),
         );
 
-        serialize_into(&mut self.serialize_buffer, items)?;
+        for item in items {
+            serialize_into(&mut self.serialize_buffer, item)?;
+        }
 
         {
             use std::io::Write;
@@ -733,21 +737,12 @@ where
         data.sort_by(|x, y| S::sort_key(x).cmp(&S::sort_key(y)));
     }
 
-    pub fn iter_range(&self, range: &Range<<S as SortKey<T>>::Key>) -> ShardItemIter<T, S> {
-        ShardItemIter::new(&self, range.clone())
+    pub fn iter_range(&self, range: &Range<<S as SortKey<T>>::Key>) -> RangeIter<T, S> {
+        RangeIter::new(&self, range.clone())
     }
 
-    fn read_shard(&self, rec: &ShardRecord<<S as SortKey<T>>::Key>, buf: &mut Vec<u8>) -> Vec<T> {
-        buf.resize(rec.len_bytes, 0);
-        let read_len = read_at(
-            &self.file.as_raw_fd(),
-            rec.offset as u64,
-            buf.as_mut_slice(),
-        ).unwrap();
-        assert_eq!(read_len, rec.len_bytes);
-
-        let mut decoder = Self::get_decoder(buf);
-        deserialize_from(&mut decoder).unwrap()
+    fn iter_shard(&self, rec: &ShardRecord<<S as SortKey<T>>::Key>) -> ShardIter<T, S> {
+        ShardIter::new(self, rec.clone())
     }
 
     pub fn len(&self) -> usize {
@@ -755,107 +750,149 @@ where
     }
 }
 
-struct MergeVec<T, S> {
-    items: Vec<T>,
+use std::io::BufReader;
+use std::io::Read;
+
+struct ReadAdapter<'a> {
+    file: &'a File,
+    offset: usize,
+    bytes_remaining: usize,
+}
+
+impl<'a> ReadAdapter<'a> {
+    fn new(file: &'a File, offset: usize, len: usize) -> Self {
+        ReadAdapter {
+            file,
+            offset,
+            bytes_remaining: len
+        }
+    }
+}
+
+impl<'a> Read for ReadAdapter<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let read_len = std::cmp::min(buf.len(), self.bytes_remaining);
+
+        let buf_slice = &mut buf[0..read_len];
+        let actual_read = read_at(&self.file.as_raw_fd(), self.offset as u64, buf_slice)?;
+        self.offset += actual_read;
+        self.bytes_remaining -= actual_read;
+
+        Ok(actual_read)
+    }
+}
+
+struct ShardIter<'a, T, S>
+where
+    S: SortKey<T>,
+{
+    next_item: Option<T>,
+    decoder: lz4::Decoder<BufReader<ReadAdapter<'a>>>,
+    items_remaining: usize,
     phantom_s: PhantomData<S>,
 }
 
-impl<'a, T, S> MergeVec<T, S>
+impl<'a, T, S> ShardIter<'a, T, S>
 where
+    T: DeserializeOwned,
     S: SortKey<T>,
     <S as SortKey<T>>::Key: Ord + Clone,
 {
-    pub fn new(items: Vec<T>) -> MergeVec<T, S> {
-        assert!(items.len() > 0);
+    pub(crate) fn new(reader: &'a ShardReaderSingle<T, S>, rec: ShardRecord<<S as SortKey<T>>::Key>) -> Self {
+        let adp_reader = ReadAdapter::new(&reader.file, rec.offset, rec.len_bytes);
+        let buf_reader = BufReader::new(adp_reader);
+        let mut lz4_reader = lz4::Decoder::new(buf_reader).unwrap();
 
-        MergeVec {
-            items: items,
+        let first_item: T = deserialize_from(&mut lz4_reader).unwrap();
+        let items_remaining = rec.len_items - 1;
+
+        ShardIter {
+            next_item: Some(first_item),
+            decoder: lz4_reader,
+            items_remaining,
             phantom_s: PhantomData,
         }
     }
 
-    pub fn current_key(&self) -> Cow<<S as SortKey<T>>::Key> {
-        S::sort_key(&self.items[self.items.len() - 1])
+    pub(crate) fn current_key(&self) -> Cow<<S as SortKey<T>>::Key> {
+        self.next_item.as_ref().map(|a| S::sort_key(a)).unwrap()
     }
 
-    pub fn pop(mut self) -> (T, Option<MergeVec<T, S>>) {
-        let item = self.items.pop().unwrap();
-
-        if self.items.len() == 0 {
+    pub(crate) fn pop(mut self) -> (T, Option<Self>) {
+        let item = self.next_item.unwrap();
+        if self.items_remaining == 0 {
             (item, None)
         } else {
-            (
-                item,
-                Some(MergeVec {
-                    items: self.items,
-                    phantom_s: PhantomData,
-                }),
-            )
+            self.next_item = Some(deserialize_from(&mut self.decoder).unwrap());
+            self.items_remaining -= 1;
+            (item, Some(self))
         }
     }
 }
 
-impl<T, S> Ord for MergeVec<T, S>
-where
-    S: SortKey<T>,
-    <S as SortKey<T>>::Key: Ord + Clone,
-{
-    fn cmp(&self, other: &MergeVec<T, S>) -> Ordering {
-        self.current_key().cmp(&other.current_key())
-    }
-}
-
-impl<T, S> PartialOrd for MergeVec<T, S>
-where
-    S: SortKey<T>,
-    <S as SortKey<T>>::Key: Ord + Clone,
-{
-    fn partial_cmp(&self, other: &MergeVec<T, S>) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T, S> PartialEq for MergeVec<T, S>
-where
-    S: SortKey<T>,
-    <S as SortKey<T>>::Key: Ord + Clone,
-{
-    fn eq(&self, other: &MergeVec<T, S>) -> bool {
-        self.current_key() == other.current_key()
-    }
-}
-
-impl<T, S> Eq for MergeVec<T, S>
-where
-    S: SortKey<T>,
-    <S as SortKey<T>>::Key: Ord + Clone,
-{
-}
-
 use std::cmp::Ordering;
 
-/// Iterator of items from a single shardio reader
-pub struct ShardItemIter<'a, T: 'a, S: 'a> 
-where 
+impl<'a, T, S> Ord for ShardIter<'a, T, S> 
+where
     S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
+{
+    fn cmp(&self, other: &ShardIter<'a, T, S>) -> Ordering {
+        let key_self = self.next_item.as_ref().map(|a| S::sort_key(a));
+        let key_other = other.next_item.as_ref().map(|b| S::sort_key(b));
+        key_self.cmp(&key_other)
+    }
+}
+
+impl<'a, T, S> Eq for ShardIter<'a, T, S>
+where
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
+{
+}
+
+impl<'a, T, S> PartialOrd for ShardIter<'a, T, S> 
+where
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
+{
+    fn partial_cmp(&self, other: &ShardIter<'a, T, S>) -> Option<Ordering> {
+        Some(self.cmp(&other))
+    }
+}
+
+impl<'a, T, S> PartialEq for ShardIter<'a, T, S>
+where
+    S: SortKey<T>,
+    <S as SortKey<T>>::Key: Ord + Clone,
+{
+    fn eq(&self, other: &ShardIter<'a, T, S>) -> bool {
+        let key_self = self.next_item.as_ref().map(|a| S::sort_key(a));
+        let key_other = other.next_item.as_ref().map(|b| S::sort_key(b));
+        key_self == key_other
+    }
+}
+
+/// Iterator of items from a single shardio reader
+pub struct RangeIter<'a, T, S> 
+where
+    T: 'a,
+    S: 'a + SortKey<T>,
     <S as SortKey<T>>::Key: 'a + Ord + Clone,
 {
     reader: &'a ShardReaderSingle<T, S>,
-    buf: Vec<u8>,
     range: Range<<S as SortKey<T>>::Key>,
-    active_queue: MinMaxHeap<MergeVec<T, S>>,
+    active_queue: MinMaxHeap<ShardIter<'a, T, S>>,
     waiting_queue: MinMaxHeap<&'a ShardRecord<<S as SortKey<T>>::Key>>,
 }
 
-impl<'a, T, S> ShardItemIter<'a, T, S>
+impl<'a, T, S> RangeIter<'a, T, S>
 where
     T: DeserializeOwned,
     S: SortKey<T>,
     <S as SortKey<T>>::Key: 'a + Clone + Ord + DeserializeOwned
 {
-    fn new(reader: &'a ShardReaderSingle<T, S>, range: Range<<S as SortKey<T>>::Key>) -> ShardItemIter<'a, T, S> {
-        let mut buf = Vec::new();
-
+    fn new(reader: &'a ShardReaderSingle<T, S>, range: Range<<S as SortKey<T>>::Key>) -> RangeIter<'a, T, S> {
         let shards: Vec<&ShardRecord<_>> = reader
             .index
             .iter()
@@ -868,18 +905,14 @@ where
 
         for s in shards {
             if Some(s.start_key.clone()) == min_item {
-                let mut items = reader.read_shard(s, &mut buf);
-                items.reverse();
-                let vec = MergeVec::new(items);
-                active_queue.push(vec);
+                active_queue.push(reader.iter_shard(s));
             } else {
                 waiting_queue.push(s);
             }
         }
 
-        ShardItemIter {
+        RangeIter {
             reader,
-            buf,
             range,
             active_queue,
             waiting_queue,
@@ -899,10 +932,8 @@ where
         }) || (self.peek_active_next().is_none() && self.waiting_queue.len() > 0)
         {
             let shard = self.waiting_queue.pop_min().unwrap();
-            let mut items = self.reader.read_shard(shard, &mut self.buf);
-            items.reverse();
-            let vec = MergeVec::new(items);
-            self.active_queue.push(vec);
+            let iter = self.reader.iter_shard(shard);
+            self.active_queue.push(iter);
         }
     }
 
@@ -920,7 +951,7 @@ where
     }
 }
 
-impl<'a, T, S> Iterator for ShardItemIter<'a, T, S>
+impl<'a, T, S> Iterator for RangeIter<'a, T, S>
 where
     T: DeserializeOwned,
     S: SortKey<T>,
@@ -1003,7 +1034,7 @@ where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: 'a + Ord + Clone,
 {
-    iterators: Vec<ShardItemIter<'a, T, S>>,
+    iterators: Vec<RangeIter<'a, T, S>>,
     merge_heap: MinMaxHeap<(SortableItem<T, S>, usize)>,
     phantom_s: PhantomData<S>,
 }
@@ -1012,9 +1043,9 @@ impl<'a, T, S> MergeIterator<'a, T, S>
 where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: 'a + Ord + Clone,
-    ShardItemIter<'a, T, S>: Iterator<Item = T>,
+    RangeIter<'a, T, S>: Iterator<Item = T>,
 {
-    fn new(mut iterators: Vec<ShardItemIter<'a, T, S>>) -> MergeIterator<'a, T, S> {
+    fn new(mut iterators: Vec<RangeIter<'a, T, S>>) -> MergeIterator<'a, T, S> {
         let mut merge_heap = MinMaxHeap::new();
 
         for (idx, itr) in iterators.iter_mut().enumerate() {
@@ -1041,7 +1072,7 @@ impl<'a, T: 'a, S: 'a> Iterator for MergeIterator<'a, T, S>
 where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: 'a + Ord + Clone,
-    ShardItemIter<'a, T, S>: Iterator<Item = T>,
+    RangeIter<'a, T, S>: Iterator<Item = T>,
 {
     type Item = T;
 
