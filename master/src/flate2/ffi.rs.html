@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `/home/travis/.cargo/registry/src/github.com-1ecc6299db9ec823/flate2-1.0.6/src/ffi.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>ffi.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source to the Rust file `/home/travis/.cargo/registry/src/github.com-1ecc6299db9ec823/flate2-1.0.7/src/ffi.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>ffi.rs.html -- source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css"><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script src="../../storage.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="shortcut icon" href="../../favicon.ico"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../../flate2/index.html'><img src='../../rust-logo.png' alt='logo' width='100'></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1">  1</span>
 <span id="2">  2</span>
 <span id="3">  3</span>
 <span id="4">  4</span>
@@ -165,6 +165,12 @@
 <span id="165">165</span>
 <span id="166">166</span>
 <span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
 </pre><div class="example-wrap"><pre class="rust ">
 <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">imp</span>::<span class="kw-2">*</span>;
 
@@ -172,17 +178,17 @@
 <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">bad_style</span>)]</span>
 <span class="kw">mod</span> <span class="ident">imp</span> {
     <span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">libz_sys</span> <span class="kw">as</span> <span class="ident">z</span>;
+    <span class="kw">use</span> <span class="ident">libc</span>::{<span class="ident">c_char</span>, <span class="ident">c_int</span>};
     <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">mem</span>;
     <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">ops</span>::{<span class="ident">Deref</span>, <span class="ident">DerefMut</span>};
-    <span class="kw">use</span> <span class="ident">libc</span>::{<span class="ident">c_char</span>, <span class="ident">c_int</span>};
 
-    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="kw-2">*</span>;
-    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">deflateEnd</span> <span class="kw">as</span> <span class="ident">mz_deflateEnd</span>;
-    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">inflateEnd</span> <span class="kw">as</span> <span class="ident">mz_inflateEnd</span>;
-    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">deflateReset</span> <span class="kw">as</span> <span class="ident">mz_deflateReset</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">deflate</span> <span class="kw">as</span> <span class="ident">mz_deflate</span>;
+    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">deflateEnd</span> <span class="kw">as</span> <span class="ident">mz_deflateEnd</span>;
+    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">deflateReset</span> <span class="kw">as</span> <span class="ident">mz_deflateReset</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">inflate</span> <span class="kw">as</span> <span class="ident">mz_inflate</span>;
+    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">inflateEnd</span> <span class="kw">as</span> <span class="ident">mz_inflateEnd</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">z_stream</span> <span class="kw">as</span> <span class="ident">mz_stream</span>;
+    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="kw-2">*</span>;
 
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_BLOCK</span> <span class="kw">as</span> <span class="ident">MZ_BLOCK</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_BUF_ERROR</span> <span class="kw">as</span> <span class="ident">MZ_BUF_ERROR</span>;
@@ -191,13 +197,13 @@
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_DEFLATED</span> <span class="kw">as</span> <span class="ident">MZ_DEFLATED</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_FINISH</span> <span class="kw">as</span> <span class="ident">MZ_FINISH</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_FULL_FLUSH</span> <span class="kw">as</span> <span class="ident">MZ_FULL_FLUSH</span>;
+    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_NEED_DICT</span> <span class="kw">as</span> <span class="ident">MZ_NEED_DICT</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_NO_FLUSH</span> <span class="kw">as</span> <span class="ident">MZ_NO_FLUSH</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_OK</span> <span class="kw">as</span> <span class="ident">MZ_OK</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_PARTIAL_FLUSH</span> <span class="kw">as</span> <span class="ident">MZ_PARTIAL_FLUSH</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_STREAM_END</span> <span class="kw">as</span> <span class="ident">MZ_STREAM_END</span>;
-    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_SYNC_FLUSH</span> <span class="kw">as</span> <span class="ident">MZ_SYNC_FLUSH</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_STREAM_ERROR</span> <span class="kw">as</span> <span class="ident">MZ_STREAM_ERROR</span>;
-    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_NEED_DICT</span> <span class="kw">as</span> <span class="ident">MZ_NEED_DICT</span>;
+    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">z</span>::<span class="ident">Z_SYNC_FLUSH</span> <span class="kw">as</span> <span class="ident">MZ_SYNC_FLUSH</span>;
 
     <span class="kw">pub</span> <span class="kw">const</span> <span class="ident">MZ_DEFAULT_WINDOW_BITS</span>: <span class="ident">c_int</span> <span class="op">=</span> <span class="number">15</span>;
 
@@ -264,13 +270,16 @@
     }
 }
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">any</span>(<span class="ident">all</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zlib&quot;</span>), <span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;rust_backend&quot;</span>), <span class="ident">all</span>(<span class="ident">target_arch</span> <span class="op">=</span> <span class="string">&quot;wasm32&quot;</span>, <span class="ident">not</span>(<span class="ident">target_os</span> <span class="op">=</span> <span class="string">&quot;emscripten&quot;</span>))))]</span>
+<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">any</span>(
+    <span class="ident">all</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zlib&quot;</span>), <span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;rust_backend&quot;</span>),
+    <span class="ident">all</span>(<span class="ident">target_arch</span> <span class="op">=</span> <span class="string">&quot;wasm32&quot;</span>, <span class="ident">not</span>(<span class="ident">target_os</span> <span class="op">=</span> <span class="string">&quot;emscripten&quot;</span>))
+))]</span>
 <span class="kw">mod</span> <span class="ident">imp</span> {
     <span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">miniz_oxide_c_api</span>;
     <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">ops</span>::{<span class="ident">Deref</span>, <span class="ident">DerefMut</span>};
 
-    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">miniz_oxide_c_api</span>::<span class="kw-2">*</span>;
     <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">miniz_oxide_c_api</span>::<span class="ident">lib_oxide</span>::<span class="kw-2">*</span>;
+    <span class="kw">pub</span> <span class="kw">use</span> <span class="self">self</span>::<span class="ident">miniz_oxide_c_api</span>::<span class="kw-2">*</span>;
 
     <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Default</span>)]</span>
     <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">StreamWrapper</span> {
@@ -292,7 +301,11 @@
     }
 }
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">all</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zlib&quot;</span>), <span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;rust_backend&quot;</span>), <span class="ident">not</span>(<span class="ident">all</span>(<span class="ident">target_arch</span> <span class="op">=</span> <span class="string">&quot;wasm32&quot;</span>, <span class="ident">not</span>(<span class="ident">target_os</span> <span class="op">=</span> <span class="string">&quot;emscripten&quot;</span>)))))]</span>
+<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">all</span>(
+    <span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zlib&quot;</span>),
+    <span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;rust_backend&quot;</span>),
+    <span class="ident">not</span>(<span class="ident">all</span>(<span class="ident">target_arch</span> <span class="op">=</span> <span class="string">&quot;wasm32&quot;</span>, <span class="ident">not</span>(<span class="ident">target_os</span> <span class="op">=</span> <span class="string">&quot;emscripten&quot;</span>)))
+))]</span>
 <span class="kw">mod</span> <span class="ident">imp</span> {
     <span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">miniz_sys</span>;
     <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">mem</span>;
@@ -332,6 +345,5 @@
         }
     }
 }
-
 </pre></div>
-</section><section id="search" class="content hidden"></section><section class="footer"></section><aside id="help" class="hidden"><div><h1 class="hidden">Help</h1><div class="shortcuts"><h2>Keyboard Shortcuts</h2><dl><dt><kbd>?</kbd></dt><dd>Show this help dialog</dd><dt><kbd>S</kbd></dt><dd>Focus the search field</dd><dt><kbd>↑</kbd></dt><dd>Move up in search results</dd><dt><kbd>↓</kbd></dt><dd>Move down in search results</dd><dt><kbd>↹</kbd></dt><dd>Switch tab</dd><dt><kbd>&#9166;</kbd></dt><dd>Go to active search result</dd><dt><kbd>+</kbd></dt><dd>Expand all sections</dd><dt><kbd>-</kbd></dt><dd>Collapse all sections</dd></dl></div><div class="infos"><h2>Search Tricks</h2><p>Prefix searches with a type followed by a colon (e.g. <code>fn:</code>) to restrict the search to a given type.</p><p>Accepted types are: <code>fn</code>, <code>mod</code>, <code>struct</code>, <code>enum</code>, <code>trait</code>, <code>type</code>, <code>macro</code>, and <code>const</code>.</p><p>Search functions by type signature (e.g. <code>vec -> usize</code> or <code>* -> vec</code>)</p><p>Search multiple things at once by splitting your query with comma (e.g. <code>str,u8</code> or <code>String,struct:Vec,test</code>)</p></div></div></aside><script>window.rootPath = "../../";window.currentCrate = "flate2";</script><script src="../../aliases.js"></script><script src="../../main.js"></script><script src="../../source-files.js"></script><script src="../../source-script.js"></script><script defer src="../../search-index.js"></script></body></html>
+</section><section id="search" class="content hidden"></section><section class="footer"></section><aside id="help" class="hidden"><div><h1 class="hidden">Help</h1><div class="shortcuts"><h2>Keyboard Shortcuts</h2><dl><dt><kbd>?</kbd></dt><dd>Show this help dialog</dd><dt><kbd>S</kbd></dt><dd>Focus the search field</dd><dt><kbd>↑</kbd></dt><dd>Move up in search results</dd><dt><kbd>↓</kbd></dt><dd>Move down in search results</dd><dt><kbd>↹</kbd></dt><dd>Switch tab</dd><dt><kbd>&#9166;</kbd></dt><dd>Go to active search result</dd><dt><kbd>+</kbd></dt><dd>Expand all sections</dd><dt><kbd>-</kbd></dt><dd>Collapse all sections</dd></dl></div><div class="infos"><h2>Search Tricks</h2><p>Prefix searches with a type followed by a colon (e.g., <code>fn:</code>) to restrict the search to a given type.</p><p>Accepted types are: <code>fn</code>, <code>mod</code>, <code>struct</code>, <code>enum</code>, <code>trait</code>, <code>type</code>, <code>macro</code>, and <code>const</code>.</p><p>Search functions by type signature (e.g., <code>vec -> usize</code> or <code>* -> vec</code>)</p><p>Search multiple things at once by splitting your query with comma (e.g., <code>str,u8</code> or <code>String,struct:Vec,test</code>)</p></div></div></aside><script>window.rootPath = "../../";window.currentCrate = "flate2";</script><script src="../../aliases.js"></script><script src="../../main.js"></script><script src="../../source-script.js"></script><script src="../../source-files.js"></script><script defer src="../../search-index.js"></script></body></html>
