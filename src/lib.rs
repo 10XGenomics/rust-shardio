@@ -1,7 +1,7 @@
 // Copyright (c) 2018 10x Genomics, Inc. All rights reserved.
 
 //! Serialize large streams of `Serialize`-able structs to disk from multiple threads, with a customizable on-disk sort order.
-//! Data is written to sorted chunks. When reading shardio will merge the data on the fly into a single sorted view. You can 
+//! Data is written to sorted chunks. When reading shardio will merge the data on the fly into a single sorted view. You can
 //! also procss disjoint subsets of sorted data.
 //!
 //! ```rust
@@ -40,7 +40,7 @@
 //!         for i in 0..(2 << 16) {
 //!             sender.send(DataStruct { a: (i%25) as u64, b: (i%100) as u32 });
 //!         }
-//! 
+//!
 //!         // Write errors are accessible by calling the finish() method
 //!         writer.finish()?;
 //!     }
@@ -78,26 +78,20 @@ extern crate serde_derive;
 #[macro_use]
 extern crate pretty_assertions;
 
-
-
-
-
-
 #[macro_use]
 extern crate failure;
 use crossbeam_channel;
-
 
 use lz4;
 
 #[cfg(test)]
 extern crate tempfile;
 
+use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::borrow::Cow;
-use std::collections::BTreeSet;
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::path::Path;
@@ -138,19 +132,17 @@ fn read_at(fd: &RawFd, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
     let mut total = 0usize;
 
     while total < buf.len() {
-        let bytes =
-            r#try!(
-                catch_err(unsafe {
-                    pread(
-                        *fd,
-                        buf.as_mut_ptr().offset(total as isize) as *mut c_void,
-                        (buf.len() - total) as size_t,
-                        (pos + total as u64) as off_t,
-                )
-            }));
+        let bytes = r#try!(catch_err(unsafe {
+            pread(
+                *fd,
+                buf.as_mut_ptr().offset(total as isize) as *mut c_void,
+                (buf.len() - total) as size_t,
+                (pos + total as u64) as off_t,
+            )
+        }));
 
         if bytes == 0 {
-            return Err(io::Error::from(io::ErrorKind::UnexpectedEof))
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
         }
 
         total += bytes;
@@ -179,20 +171,17 @@ fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> io::Result<usize> {
         //    return Err(io::Error::from(io::ErrorKind::NotConnected));
         //}
 
-        let bytes =
-            r#try!(
-                catch_err(unsafe {
-                    pwrite(
-                        *fd,
-                        buf.as_ptr().offset(total as isize) as *const c_void,
-                        (buf.len() - total) as size_t,
-                        (pos + total as u64) as off_t,
-                    )
-               })
-            );
+        let bytes = r#try!(catch_err(unsafe {
+            pwrite(
+                *fd,
+                buf.as_ptr().offset(total as isize) as *const c_void,
+                (buf.len() - total) as size_t,
+                (pos + total as u64) as off_t,
+            )
+        }));
 
         if bytes == 0 {
-            return Err(io::Error::from(io::ErrorKind::UnexpectedEof))
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
         }
 
         total += bytes;
@@ -233,7 +222,7 @@ impl<K: Ord + Serialize> FileManager<K> {
         })
 
         // FIXME: write a magic string to the start of the file,
-        // and maybe some metadata about the types being stored and the 
+        // and maybe some metadata about the types being stored and the
         // compression scheme.
         // FIXME: write to a TempFile that will be destroyed unless
         // writing completes successfully.
@@ -265,25 +254,25 @@ impl<K: Ord + Serialize> FileManager<K> {
 /// The function `sort_key` returns a `Cow` so that we abstract over Owned or
 /// Borrowed data.
 /// ```rust
-/// 
+///
 /// extern crate shardio;
 /// use shardio::*;
 /// use std::borrow::Cow;
-/// 
+///
 /// // The default sort order for DataStruct will be by field1.
 /// #[derive(Ord, PartialOrd, Eq, PartialEq)]
 /// struct DataStruct {
 ///     field1: usize,
 ///     field2: String,
 /// }
-/// 
+///
 /// // Define a marker struct for your new sort order
 /// struct Field2SortKey;
-/// 
+///
 /// // Define the new sort key by extracting field2 from DataStruct
 /// impl SortKey<DataStruct> for Field2SortKey {
 ///     type Key = String;
-/// 
+///
 ///     fn sort_key(t: &DataStruct) -> Cow<String> {
 ///         Cow::Borrowed(&t.field2)
 ///     }
@@ -309,10 +298,10 @@ where
 
 /// Write a stream data items of type `T` to disk, in the sort order defined by `S`.
 ///
-/// Data is buffered up to `item_buffer_size` items, then sorted, block compressed and written to disk. 
+/// Data is buffered up to `item_buffer_size` items, then sorted, block compressed and written to disk.
 /// When the ShardWriter is dropped or has `finish()` called on it, it will
 /// flush remaining items to disk, write an index of the chunk data and close the file.
-/// 
+///
 /// The `get_sender()` methods returns a `ShardSender` that must be used to send items to the writer.
 /// You must close each ShardSender by calling its `finish()` method, or data may be lost.
 ///
@@ -415,7 +404,8 @@ where
         self.helper.buffer_thread.take().map(|x| x.join());
 
         // Wait for the writer thread to finish & propagate any errors
-        let join_handle = self.helper
+        let join_handle = self
+            .helper
             .writer_thread
             .take()
             .expect("called finish twice");
@@ -512,7 +502,9 @@ where
         let r = self.buf_rx.try_recv();
         let sent = self.buf_tx.send((buf, done));
         if sent.is_err() {
-            return Err(format_err!("writer thread shut down, see ShardWriterThread.finish() for error"));
+            return Err(format_err!(
+                "writer thread shut down, see ShardWriterThread.finish() for error"
+            ));
         }
 
         match r {
@@ -559,7 +551,7 @@ where
 {
     fn new(
         chunk_size: usize,
-        writer: FileManager< <S as SortKey<T>>::Key >,
+        writer: FileManager<<S as SortKey<T>>::Key>,
         buf_rx: Receiver<(Vec<T>, bool)>,
         buf_tx: Sender<Vec<T>>,
     ) -> ShardWriterThread<T, S> {
@@ -695,7 +687,9 @@ impl<T: Send> ShardSender<T> {
             std::mem::swap(&mut send_buf, &mut self.buffer);
             let e = self.tx.send(Some(send_buf));
             if e.is_err() {
-                return Err(format_err!("ShardWriter failed. See ShardWriter.finish() for underlying error"));
+                return Err(format_err!(
+                    "ShardWriter failed. See ShardWriter.finish() for underlying error"
+                ));
             }
         }
 
@@ -733,8 +727,9 @@ impl<T: Send> Drop for ShardSender<T> {
 }
 
 /// Read a shardio file
-struct ShardReaderSingle<T, S = DefaultSort> 
-where S: SortKey<T>
+struct ShardReaderSingle<T, S = DefaultSort>
+where
+    S: SortKey<T>,
 {
     file: File,
     index: Vec<ShardRecord<<S as SortKey<T>>::Key>>,
@@ -763,13 +758,15 @@ where
     }
 
     /// Read shard index
-    fn read_index_block(file: &mut File) -> Result<Vec<ShardRecord<<S as SortKey<T>>::Key>>, Error> {
+    fn read_index_block(
+        file: &mut File,
+    ) -> Result<Vec<ShardRecord<<S as SortKey<T>>::Key>>, Error> {
         let _ = file.seek(SeekFrom::End(-24))?;
         let _num_shards = file.read_u64::<BigEndian>()? as usize;
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position as u64))?;
-        
+
         Ok(deserialize_from(file)?)
     }
 
@@ -777,8 +774,14 @@ where
         lz4::Decoder::new(buffer.as_slice()).unwrap()
     }
 
-    pub fn read_range(&self, range: &Range<<S as SortKey<T>>::Key>, data: &mut Vec<T>, buf: &mut Vec<u8>) -> Result<(), Error> {
-        for rec in self.index
+    pub fn read_range(
+        &self,
+        range: &Range<<S as SortKey<T>>::Key>,
+        data: &mut Vec<T>,
+        buf: &mut Vec<u8>,
+    ) -> Result<(), Error> {
+        for rec in self
+            .index
             .iter()
             .cloned()
             .filter(|x| range.intersects_shard(x))
@@ -800,11 +803,17 @@ where
         Ok(())
     }
 
-    pub fn iter_range(&self, range: &Range<<S as SortKey<T>>::Key>) -> Result<RangeIter<'_, T, S>, Error> {
+    pub fn iter_range(
+        &self,
+        range: &Range<<S as SortKey<T>>::Key>,
+    ) -> Result<RangeIter<'_, T, S>, Error> {
         RangeIter::new(&self, range.clone())
     }
 
-    fn iter_shard(&self, rec: &ShardRecord<<S as SortKey<T>>::Key>) -> Result<ShardIter<'_, T, S>, Error> {
+    fn iter_shard(
+        &self,
+        rec: &ShardRecord<<S as SortKey<T>>::Key>,
+    ) -> Result<ShardIter<'_, T, S>, Error> {
         ShardIter::new(self, rec.clone())
     }
 
@@ -827,7 +836,7 @@ impl<'a> ReadAdapter<'a> {
         ReadAdapter {
             file,
             offset,
-            bytes_remaining: len
+            bytes_remaining: len,
         }
     }
 }
@@ -861,7 +870,10 @@ where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: Ord + Clone,
 {
-    pub(crate) fn new(reader: &'a ShardReaderSingle<T, S>, rec: ShardRecord<<S as SortKey<T>>::Key>) -> Result<Self, Error> {
+    pub(crate) fn new(
+        reader: &'a ShardReaderSingle<T, S>,
+        rec: ShardRecord<<S as SortKey<T>>::Key>,
+    ) -> Result<Self, Error> {
         let adp_reader = ReadAdapter::new(&reader.file, rec.offset, rec.len_bytes);
         let buf_reader = BufReader::new(adp_reader);
         let mut lz4_reader = lz4::Decoder::new(buf_reader)?;
@@ -895,7 +907,7 @@ where
 
 use std::cmp::Ordering;
 
-impl<'a, T, S> Ord for ShardIter<'a, T, S> 
+impl<'a, T, S> Ord for ShardIter<'a, T, S>
 where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: Ord + Clone,
@@ -914,7 +926,7 @@ where
 {
 }
 
-impl<'a, T, S> PartialOrd for ShardIter<'a, T, S> 
+impl<'a, T, S> PartialOrd for ShardIter<'a, T, S>
 where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: Ord + Clone,
@@ -937,7 +949,7 @@ where
 }
 
 /// Iterator of items from a single shardio reader
-pub struct RangeIter<'a, T, S> 
+pub struct RangeIter<'a, T, S>
 where
     T: 'a,
     S: 'a + SortKey<T>,
@@ -953,9 +965,12 @@ impl<'a, T, S> RangeIter<'a, T, S>
 where
     T: DeserializeOwned,
     S: SortKey<T>,
-    <S as SortKey<T>>::Key: 'a + Clone + Ord + DeserializeOwned
+    <S as SortKey<T>>::Key: 'a + Clone + Ord + DeserializeOwned,
 {
-    fn new(reader: &'a ShardReaderSingle<T, S>, range: Range<<S as SortKey<T>>::Key>) -> Result<RangeIter<'a, T, S>, Error> {
+    fn new(
+        reader: &'a ShardReaderSingle<T, S>,
+        range: Range<<S as SortKey<T>>::Key>,
+    ) -> Result<RangeIter<'a, T, S>, Error> {
         let shards: Vec<&ShardRecord<_>> = reader
             .index
             .iter()
@@ -1015,7 +1030,7 @@ where
     }
 }
 
-fn transpose<T,E>(v: Option<Result<T, E>>) -> Result<Option<T>, E> {
+fn transpose<T, E>(v: Option<Result<T, E>>) -> Result<Option<T>, E> {
     match v {
         Some(Ok(v)) => Ok(Some(v)),
         Some(Err(e)) => Err(e),
@@ -1034,7 +1049,9 @@ where
     fn next(&mut self) -> Option<Result<T, Error>> {
         loop {
             let a = self.activate_shards();
-            if a.is_err() { return Some(Err(a.unwrap_err())); }
+            if a.is_err() {
+                return Some(Err(a.unwrap_err()));
+            }
 
             match self.next_active() {
                 Some(Ok(v)) => {
@@ -1044,7 +1061,7 @@ where
                         Rorder::Intersects => return Some(Ok(v)),
                         Rorder::After => return None,
                     }
-                },
+                }
                 Some(Err(e)) => return Some(Err(e)),
                 None => return None,
             }
@@ -1104,7 +1121,7 @@ where
 }
 
 /// Iterator over merged shardio files
-pub struct MergeIterator<'a, T: 'a, S: 'a> 
+pub struct MergeIterator<'a, T: 'a, S: 'a>
 where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: 'a + Ord + Clone,
@@ -1172,7 +1189,7 @@ where
 /// Read from a collection of shardio files. The input data is merged to give
 /// a single sorted view of the combined dataset. The input files must
 /// be created with the same sort order `S` as they are read with.
-pub struct ShardReader<T, S = DefaultSort> 
+pub struct ShardReader<T, S = DefaultSort>
 where
     S: SortKey<T>,
 {
@@ -1207,7 +1224,11 @@ where
     }
 
     /// Read data from the given `range` into `data` buffer. The `data` buffer is not cleared before adding items.
-    pub fn read_range(&self, range: &Range<<S as SortKey<T>>::Key>, data: &mut Vec<T>) -> Result<(), Error> {
+    pub fn read_range(
+        &self,
+        range: &Range<<S as SortKey<T>>::Key>,
+        data: &mut Vec<T>,
+    ) -> Result<(), Error> {
         let mut buf = Vec::new();
         for r in &self.readers {
             r.read_range(range, data, &mut buf)?;
@@ -1216,7 +1237,10 @@ where
     }
 
     /// Iterate over items in the given `range`
-    pub fn iter_range<'a>(&'a self, range: &Range<<S as SortKey<T>>::Key>) -> Result<MergeIterator<'a, T, S>, Error> {
+    pub fn iter_range<'a>(
+        &'a self,
+        range: &Range<<S as SortKey<T>>::Key>,
+    ) -> Result<MergeIterator<'a, T, S>, Error> {
         let mut iters = Vec::new();
         for r in self.readers.iter() {
             let iter = r.iter_range(range)?;
@@ -1238,7 +1262,11 @@ where
 
     /// Generate `num_chunks` ranges covering the give `range`, each with a roughly equal numbers of elements.
     /// The ranges can be fed to `iter_range`
-    pub fn make_chunks(&self, num_chunks: usize, range: &Range<<S as SortKey<T>>::Key>) -> Vec<Range<<S as SortKey<T>>::Key>> {
+    pub fn make_chunks(
+        &self,
+        num_chunks: usize,
+        range: &Range<<S as SortKey<T>>::Key>,
+    ) -> Vec<Range<<S as SortKey<T>>::Key>> {
         assert!(num_chunks > 0);
 
         // Enumerate all the in-range known start locations in the dataset
@@ -1266,7 +1294,8 @@ where
                         let idx = ((n * i) as f64 / num_chunks as f64).round() as usize;
                         Some(starts[idx].clone())
                     }
-                }).collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
         };
 
         let mut chunks = Vec::new();
@@ -1293,7 +1322,7 @@ mod shard_tests {
     use std::collections::HashSet;
     use std::fmt::Debug;
     use std::hash::Hash;
-    use std::iter::{FromIterator, repeat};
+    use std::iter::{repeat, FromIterator};
     use std::u8;
     use tempfile;
 
@@ -1338,21 +1367,21 @@ mod shard_tests {
 
         let n = (1 << 31) - 1000;
         let mut buf = Vec::with_capacity(n);
-        for i in 0 .. n {
+        for i in 0..n {
             buf.push((i % 254) as u8);
         }
 
         let written = write_at(&tmp.as_raw_fd(), 0, &buf).unwrap();
         assert_eq!(n, written);
 
-        for i in 0 .. n {
+        for i in 0..n {
             buf[i] = 0;
         }
 
         let read = read_at(&tmp.as_raw_fd(), 0, &mut buf).unwrap();
         assert_eq!(n, read);
 
-        for i in 0 .. n {
+        for i in 0..n {
             assert_eq!(buf[i], (i % 254) as u8)
         }
     }
@@ -1373,7 +1402,7 @@ mod shard_tests {
     #[test]
     fn test_shard_round_trip_big_chunks() {
         // Test different buffering configurations
-        check_round_trip(1<<18, 64, 1<<20, 1 << 21);
+        check_round_trip(1 << 18, 64, 1 << 20, 1 << 21);
     }
 
     #[test]
@@ -1387,7 +1416,7 @@ mod shard_tests {
         check_round_trip_sort_key(50, 2, 256, 1 << 16, true)?;
         check_round_trip_sort_key(10, 20, 40, 1 << 14, true)?;
 
-        check_round_trip_sort_key(64, 16, 1 << 17, 1 << 16, true)?;  
+        check_round_trip_sort_key(64, 16, 1 << 17, 1 << 16, true)?;
         check_round_trip_sort_key(128, 16, 1 << 16, 1 << 16, true)?;
         check_round_trip_sort_key(128, 16, 1 << 15, 1 << 16, true)?;
 
@@ -1409,12 +1438,7 @@ mod shard_tests {
 
         // Write and close file
         let true_items = {
-            let manager: ShardWriter<T1> = ShardWriter::new(
-                tmp.path(),
-                16,
-                64,
-                1 << 10,
-            ).unwrap();
+            let manager: ShardWriter<T1> = ShardWriter::new(tmp.path(), 16, 64, 1 << 10).unwrap();
             let true_items = repeat(rand_items(1)[0]).take(n_items).collect::<Vec<_>>();
 
             // Sender must be closed
@@ -1432,7 +1456,7 @@ mod shard_tests {
         // Open finished file
         let reader = ShardReader::<T1>::open(tmp.path())?;
 
-        let _all_items: Result<_,_> = reader.iter_range(&Range::all())?.collect();
+        let _all_items: Result<_, _> = reader.iter_range(&Range::all())?.collect();
         let all_items: Vec<_> = _all_items?;
         set_compare(&true_items, &all_items);
 
@@ -1474,7 +1498,8 @@ mod shard_tests {
             buffer_size,
             n_items,
             true,
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     fn check_round_trip_opt(
@@ -1603,8 +1628,18 @@ mod shard_tests {
             for rc in &[1, 4, 7, 12, 15, 21, 65, 8192] {
                 all_items_chunks.clear();
                 let chunks = set_reader.make_chunks(*rc, &Range::all());
-                assert!(chunks.len() <= *rc, "chunks > req: ({} > {})", chunks.len(), *rc);
-                assert!(chunks.len() <= u8::max_value() as usize, "chunks > |T1.d| ({} > {})", chunks.len(), u8::max_value());
+                assert!(
+                    chunks.len() <= *rc,
+                    "chunks > req: ({} > {})",
+                    chunks.len(),
+                    *rc
+                );
+                assert!(
+                    chunks.len() <= u8::max_value() as usize,
+                    "chunks > |T1.d| ({} > {})",
+                    chunks.len(),
+                    u8::max_value()
+                );
                 for c in chunks {
                     let itr = set_reader.iter_range(&c)?;
                     all_items_chunks.extend(itr);
@@ -1635,7 +1670,6 @@ mod shard_tests {
 
     #[test]
     fn test_io_error() -> Result<(), Error> {
-
         let disk_chunk_size = 1 << 20;
         let producer_chunk_size = 1 << 4;
         let buffer_size = 1 << 16;
@@ -1678,7 +1712,6 @@ mod shard_tests {
         let mut got_err = false;
         let iter = reader.iter_range(&Range::all())?;
         for i in iter {
-
             if i.is_err() {
                 got_err = true;
                 break;

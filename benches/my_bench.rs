@@ -178,34 +178,35 @@ fn main() {
             b.iter(|| direct(size));
         },
         &v,
-    ).bench_function_over_inputs(
-            "lz4_only",
-            |b, &&size| {
-                b.iter(|| lz4_only(size));
-            },
-            &v,
-        )
-        .bench_function_over_inputs(
-            "bincode_only",
-            |b, &&size| {
-                b.iter(|| bincode_only(size));
-            },
-            &v,
-        )
-        .bench_function_over_inputs(
-            "bincode_lz4",
-            |b, &&size| {
-                b.iter(|| bincode_lz4(size));
-            },
-            &v,
-        )
-        .bench_function_over_inputs(
-            "bincode_buf_lz4",
-            |b, &&size| {
-                b.iter(|| bincode_buf_lz4(size));
-            },
-            &v,
-        );
+    )
+    .bench_function_over_inputs(
+        "lz4_only",
+        |b, &&size| {
+            b.iter(|| lz4_only(size));
+        },
+        &v,
+    )
+    .bench_function_over_inputs(
+        "bincode_only",
+        |b, &&size| {
+            b.iter(|| bincode_only(size));
+        },
+        &v,
+    )
+    .bench_function_over_inputs(
+        "bincode_lz4",
+        |b, &&size| {
+            b.iter(|| bincode_lz4(size));
+        },
+        &v,
+    )
+    .bench_function_over_inputs(
+        "bincode_buf_lz4",
+        |b, &&size| {
+            b.iter(|| bincode_buf_lz4(size));
+        },
+        &v,
+    );
     //criterion_group!(benches, criterion_benchmark);
     //criterion_main!(benches);
 }
