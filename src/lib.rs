@@ -516,7 +516,8 @@ where
 
         match r {
             Ok(r) => return Ok(r),
-            Err(_) => (),
+            Err(crossbeam_channel::TryRecvError::Empty) => (),
+            Err(v) => return Err(v.into()),
         };
 
         if !self.second_buf {
