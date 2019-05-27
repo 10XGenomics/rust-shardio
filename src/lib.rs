@@ -1569,4 +1569,60 @@ mod shard_tests {
             return false;
         }
     }
+
+    #[test]
+    fn test_io_error() -> Result<(), Error> {
+
+        let disk_chunk_size = 1 << 20;
+        let producer_chunk_size = 1 << 4;
+        let buffer_size = 1 << 16;
+        let n_items = 1 << 19;
+
+        let tmp = tempfile::NamedTempFile::new()?;
+
+        // Write and close file
+        let _true_items = {
+            let manager: ShardWriter<T1> = ShardWriter::new(
+                tmp.path(),
+                producer_chunk_size,
+                disk_chunk_size,
+                buffer_size,
+            )?;
+            let mut true_items = rand_items(n_items);
+
+            // Sender must be closed
+            {
+                for chunk in true_items.chunks(n_items / 8) {
+                    let mut sender = manager.get_sender();
+                    for item in chunk {
+                        sender.send(*item)?;
+                    }
+                }
+            }
+            true_items.sort();
+            true_items
+        };
+
+        // Open finished file
+        let reader = ShardReader::<T1>::open(tmp.path())?;
+
+        // Truncate the file, so we create a read error.
+        let file = tmp.reopen().unwrap();
+        let sz = file.metadata().unwrap().len();
+        file.set_len(3 * sz / 4).unwrap();
+
+        // make sure we get a read err due to the truncated file.
+        let mut got_err = false;
+        let iter = reader.iter_range(&Range::all())?;
+        for i in iter {
+
+            if i.is_err() {
+                got_err = true;
+                break;
+            }
+        }
+
+        assert!(got_err);
+        Ok(())
+    }
 }
