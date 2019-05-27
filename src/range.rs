@@ -11,7 +11,7 @@ pub enum Rorder {
 
 /// A range of points over the type `K`, spanning the half-open interval [`start`, `end`). A value
 /// of `None` indicates that the interval is unbounded in that direction.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct Range<K> {
     pub start: Option<K>,
     pub end: Option<K>,

@@ -16,11 +16,11 @@ byteorder = "*"
 libc = "*"
 lz4 = "*"
 rayon = "*"
-crossbeam-channel = "0.1.2"
 failure = "0.1.5"
+crossbeam-channel = "0.3.8"
 failure_derive = "*"
 pretty_assertions = "0.5.1"
-min-max-heap = "1.0.2"
+min-max-heap = "1.2.2"
 
 [dev-dependencies]
 tempfile = "*"
