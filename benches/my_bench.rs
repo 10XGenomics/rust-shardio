@@ -13,7 +13,7 @@ extern crate tempfile;
 use criterion::Criterion;
 use failure::Error;
 use shardio::*;
-use std::collections::hash_map::DefaultHasher;
+
 use std::fs::File;
 use std::hash::Hasher;
 use std::io::BufWriter;
@@ -130,7 +130,7 @@ fn main() {
     }
 
     fn lz4_only(size: usize) -> Result<(), Error> {
-        let mut tf = getf();
+        let tf = getf();
         let mut fo = lz4::EncoderBuilder::new().build(tf)?;
         fo.write(&DATA[0..size]);
         fo.finish().1?;
@@ -138,7 +138,7 @@ fn main() {
     }
 
     fn bincode_only(size: usize) -> Result<(), Error> {
-        let mut tf = getf();
+        let tf = getf();
         let n = size / std::mem::size_of::<T1>();
         bincode::serialize_into(tf, &D2[0..n]);
         Ok(())

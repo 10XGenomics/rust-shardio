@@ -1,6 +1,6 @@
 // Copyright (c) 2018 10x Genomics, Inc. All rights reserved.
 
-use ShardRecord;
+use crate::ShardRecord;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Rorder {

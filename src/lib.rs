@@ -119,10 +119,10 @@ use failure::Error;
 
 pub mod pmap;
 pub mod range;
-use range::Rorder;
+use crate::range::Rorder;
 pub mod helper;
 
-pub use range::Range;
+pub use crate::range::Range;
 
 fn catch_err(e: ssize_t) -> io::Result<usize> {
     if e == -1 as ssize_t {
@@ -139,7 +139,7 @@ fn read_at(fd: &RawFd, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
 
     while total < buf.len() {
         let bytes =
-            try!(
+            r#try!(
                 catch_err(unsafe {
                     pread(
                         *fd,
@@ -180,7 +180,7 @@ fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> io::Result<usize> {
         //}
 
         let bytes =
-            try!(
+            r#try!(
                 catch_err(unsafe {
                     pwrite(
                         *fd,
