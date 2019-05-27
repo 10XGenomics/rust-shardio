@@ -1403,7 +1403,7 @@ mod shard_tests {
     }
 
     #[test]
-    fn test_shard_one_key() {
+    fn test_shard_one_key() -> Result<(), Error> {
         let n_items = 1 << 16;
         let tmp = tempfile::NamedTempFile::new().unwrap();
 
@@ -1422,7 +1422,7 @@ mod shard_tests {
                 for chunk in true_items.chunks(n_items / 8) {
                     let mut sender = manager.get_sender();
                     for item in chunk {
-                        sender.send(*item);
+                        sender.send(*item)?;
                     }
                 }
             }
@@ -1430,9 +1430,10 @@ mod shard_tests {
         };
 
         // Open finished file
-        let reader = ShardReader::<T1>::open(tmp.path());
+        let reader = ShardReader::<T1>::open(tmp.path())?;
 
-        let all_items = reader.iter_range(&Range::all()).collect();
+        let _all_items: Result<_,_> = reader.iter_range(&Range::all())?.collect();
+        let all_items: Vec<_> = _all_items?;
         set_compare(&true_items, &all_items);
 
         if !(true_items == all_items) {
@@ -1443,18 +1444,22 @@ mod shard_tests {
 
         for rc in [1, 3, 8, 15, 32, 63, 128, 255, 512, 1095].iter() {
             // Open finished file & test chunked reads
-            let set_reader = ShardReader::<T1>::open(&tmp.path());
+            let set_reader = ShardReader::<T1>::open(&tmp.path())?;
             let mut all_items_chunks = Vec::new();
 
             // Read in chunks
             let chunks = set_reader.make_chunks(*rc, &Range::all());
             assert_eq!(1, chunks.len());
             for c in chunks {
-                let itr = set_reader.iter_range(&c);
-                all_items_chunks.extend(itr);
+                let itr = set_reader.iter_range(&c)?;
+                for i in itr {
+                    all_items_chunks.push(i?);
+                }
             }
             assert_eq!(&true_items, &all_items_chunks);
         }
+
+        Ok(())
     }
 
     fn check_round_trip(
