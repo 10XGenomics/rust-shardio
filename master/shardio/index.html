@@ -1,62 +1,78 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `shardio` crate."><meta name="keywords" content="rust, rustlang, rust-lang, shardio"><title>shardio - Rust</title><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../dark.css"><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script src="../storage.js"></script><noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="shortcut icon" href="../favicon.ico"><style type="text/css">#crate-search{background-image:url("../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../shardio/index.html'><img src='../rust-logo.png' alt='logo' width='100'></a><p class='location'>Crate shardio</p><div class="sidebar-elems"><a id='all-types' href='all.html'><p>See all shardio's items</p></a><div class="block items"><ul><li><a href="#reexports">Re-exports</a></li><li><a href="#modules">Modules</a></li><li><a href="#structs">Structs</a></li><li><a href="#traits">Traits</a></li></ul></div><p class='location'></p><script>window.sidebarCurrent = {name: 'shardio', ty: 'mod', relpath: '../'};</script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../settings.html"><img src="../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../src/shardio/lib.rs.html#3-1479' title='goto source code'>[src]</a></span><span class='in-band'>Crate <a class="mod" href=''>shardio</a></span></h1><div class='docblock'><p>Efficiently write Rust structs to shard files from multiple threads.
-You can process different subsets of your data in different threads, different processes.
-When reading shardio will merge the data on the fly into a single sorted view.</p>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `shardio` crate."><meta name="keywords" content="rust, rustlang, rust-lang, shardio"><title>shardio - Rust</title><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../dark.css"><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script src="../storage.js"></script><noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="shortcut icon" href="../favicon.ico"><style type="text/css">#crate-search{background-image:url("../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../shardio/index.html'><img src='../rust-logo.png' alt='logo' width='100'></a><p class='location'>Crate shardio</p><div class="sidebar-elems"><a id='all-types' href='all.html'><p>See all shardio's items</p></a><div class="block items"><ul><li><a href="#reexports">Re-exports</a></li><li><a href="#modules">Modules</a></li><li><a href="#structs">Structs</a></li><li><a href="#traits">Traits</a></li></ul></div><p class='location'></p><script>window.sidebarCurrent = {name: 'shardio', ty: 'mod', relpath: '../'};</script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../theme.js"></script><nav class="sub"><form class="search-form js-only"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><a id="settings-menu" href="../settings.html"><img src="../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../src/shardio/lib.rs.html#3-1628' title='goto source code'>[src]</a></span><span class='in-band'>Crate <a class="mod" href=''>shardio</a></span></h1><div class='docblock'><p>Serialize large streams of <code>Serialize</code>-able structs to disk from multiple threads, with a customizable on-disk sort order.
+Data is written to sorted chunks. When reading shardio will merge the data on the fly into a single sorted view. You can
+also procss disjoint subsets of sorted data.</p>
 
 <div class="example-wrap"><pre class="rust rust-example-rendered">
 <span class="attribute">#[<span class="ident">macro_use</span>]</span>
 <span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">serde_derive</span>;
 
 <span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">shardio</span>;
+<span class="kw">extern</span> <span class="kw">crate</span> <span class="ident">failure</span>;
 <span class="kw">use</span> <span class="ident">shardio</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">fs</span>::<span class="ident">File</span>;
+<span class="kw">use</span> <span class="ident">failure</span>::<span class="ident">Error</span>;
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Serialize</span>, <span class="ident">Deserialize</span>, <span class="ident">PartialOrd</span>, <span class="ident">Ord</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">struct</span> <span class="ident">Test</span> {
+<span class="kw">struct</span> <span class="ident">DataStruct</span> {
     <span class="ident">a</span>: <span class="ident">u64</span>,
     <span class="ident">b</span>: <span class="ident">u32</span>,
 }
 
-<span class="kw">fn</span> <span class="ident">main</span>()
+<span class="kw">fn</span> <span class="ident">main</span>() <span class="op">-&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span>
 {
     <span class="kw">let</span> <span class="ident">filename</span> <span class="op">=</span> <span class="string">&quot;test.shardio&quot;</span>;
     {
         <span class="comment">// Open a shardio output file</span>
-        <span class="comment">// Parameters here  buffering, and the size of disk chunks</span>
+        <span class="comment">// Parameters here control buffering, and the size of disk chunks</span>
         <span class="comment">// which affect how many disk chunks need to be read to</span>
         <span class="comment">// satisfy a range query when reading.</span>
-        <span class="kw">let</span> <span class="ident">manager</span>: <span class="ident">ShardWriter</span><span class="op">&lt;</span><span class="ident">Test</span><span class="op">&gt;</span> <span class="op">=</span>
-            <span class="ident">ShardWriter</span>::<span class="ident">new</span>(<span class="ident">filename</span>, <span class="number">64</span>, <span class="number">256</span>, <span class="number">1</span><span class="op">&lt;&lt;</span><span class="number">16</span>).<span class="ident">unwrap</span>();
+        <span class="comment">// In this example the &#39;built-in&#39; sort order given by #[derive(Ord)]</span>
+        <span class="comment">// is used.</span>
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">ShardWriter</span><span class="op">&lt;</span><span class="ident">DataStruct</span><span class="op">&gt;</span> <span class="op">=</span>
+            <span class="ident">ShardWriter</span>::<span class="ident">new</span>(<span class="ident">filename</span>, <span class="number">64</span>, <span class="number">256</span>, <span class="number">1</span><span class="op">&lt;&lt;</span><span class="number">16</span>)<span class="question-mark">?</span>;
 
         <span class="comment">// Get a handle to send data to the file</span>
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">sender</span> <span class="op">=</span> <span class="ident">manager</span>.<span class="ident">get_sender</span>();
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">sender</span> <span class="op">=</span> <span class="ident">writer</span>.<span class="ident">get_sender</span>();
 
         <span class="comment">// Generate some test data</span>
         <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">0</span>..(<span class="number">2</span> <span class="op">&lt;&lt;</span> <span class="number">16</span>) {
-            <span class="ident">sender</span>.<span class="ident">send</span>(<span class="ident">Test</span> { <span class="ident">a</span>: (<span class="ident">i</span><span class="op">%</span><span class="number">25</span>) <span class="kw">as</span> <span class="ident">u64</span>, <span class="ident">b</span>: (<span class="ident">i</span><span class="op">%</span><span class="number">100</span>) <span class="kw">as</span> <span class="ident">u32</span> });
+            <span class="ident">sender</span>.<span class="ident">send</span>(<span class="ident">DataStruct</span> { <span class="ident">a</span>: (<span class="ident">i</span><span class="op">%</span><span class="number">25</span>) <span class="kw">as</span> <span class="ident">u64</span>, <span class="ident">b</span>: (<span class="ident">i</span><span class="op">%</span><span class="number">100</span>) <span class="kw">as</span> <span class="ident">u32</span> });
         }
+ 
+        <span class="comment">// Write errors are accessible by calling the finish() method</span>
+        <span class="ident">writer</span>.<span class="ident">finish</span>()<span class="question-mark">?</span>;
     }
 
     <span class="comment">// Open finished file &amp; test chunked reads</span>
-    <span class="kw">let</span> <span class="ident">reader</span> <span class="op">=</span> <span class="ident">ShardReader</span>::<span class="op">&lt;</span><span class="ident">Test</span><span class="op">&gt;</span>::<span class="ident">open</span>(<span class="ident">filename</span>);
+    <span class="kw">let</span> <span class="ident">reader</span> <span class="op">=</span> <span class="ident">ShardReader</span>::<span class="op">&lt;</span><span class="ident">DataStruct</span><span class="op">&gt;</span>::<span class="ident">open</span>(<span class="ident">filename</span>)<span class="question-mark">?</span>;
 
-    <span class="comment">// Read back data</span>
+     
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">all_items</span> <span class="op">=</span> <span class="ident">Vec</span>::<span class="ident">new</span>();
 
+    <span class="comment">// Shardio will divide the key space into 5 roughly equally sized chunks.</span>
+    <span class="comment">// These chunks can be processed serially, in parallel in different threads,</span>
+    <span class="comment">// or on different machines.</span>
     <span class="kw">let</span> <span class="ident">chunks</span> <span class="op">=</span> <span class="ident">reader</span>.<span class="ident">make_chunks</span>(<span class="number">5</span>, <span class="kw-2">&amp;</span><span class="ident">Range</span>::<span class="ident">all</span>());
+
     <span class="kw">for</span> <span class="ident">c</span> <span class="kw">in</span> <span class="ident">chunks</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">range_iter</span> <span class="op">=</span> <span class="ident">reader</span>.<span class="ident">iter_range</span>(<span class="kw-2">&amp;</span><span class="ident">c</span>);
-        <span class="ident">all_items</span>.<span class="ident">extend</span>(<span class="ident">range_iter</span>);
+        <span class="comment">// Iterate over all the data in chunk c.</span>
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">range_iter</span> <span class="op">=</span> <span class="ident">reader</span>.<span class="ident">iter_range</span>(<span class="kw-2">&amp;</span><span class="ident">c</span>)<span class="question-mark">?</span>;
+        <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="ident">range_iter</span> {
+            <span class="ident">all_items</span>.<span class="ident">push</span>(<span class="ident">i</span><span class="question-mark">?</span>);
+        }
     }
 
     <span class="comment">// Data will be return in sorted order</span>
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">all_items_sorted</span> <span class="op">=</span> <span class="ident">all_items</span>.<span class="ident">clone</span>();
     <span class="ident">all_items</span>.<span class="ident">sort</span>();
     <span class="macro">assert_eq</span><span class="macro">!</span>(<span class="ident">all_items</span>, <span class="ident">all_items_sorted</span>);
+    <span class="prelude-val">Ok</span>(())
 }</pre></div>
 </div><h2 id='reexports' class='section-header'><a href="#reexports">Re-exports</a></h2>
 <table><tr><td><code>pub use range::<a class="struct" href="../shardio/range/struct.Range.html" title="struct shardio::range::Range">Range</a>;</code></td></tr></table><h2 id='modules' class='section-header'><a href="#modules">Modules</a></h2>
 <table><tr class='module-item'><td><a class="mod" href="helper/index.html" title='shardio::helper mod'>helper</a></td><td class='docblock-short'></td></tr><tr class='module-item'><td><a class="mod" href="pmap/index.html" title='shardio::pmap mod'>pmap</a></td><td class='docblock-short'></td></tr><tr class='module-item'><td><a class="mod" href="range/index.html" title='shardio::range mod'>range</a></td><td class='docblock-short'></td></tr></table><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
-<table><tr class='module-item'><td><a class="struct" href="struct.DefaultSort.html" title='shardio::DefaultSort struct'>DefaultSort</a></td><td class='docblock-short'><p>Marker struct for sorting types that implement <code>Ord</code> in their 'natural' order.</p>
+<table><tr class='module-item'><td><a class="struct" href="struct.DefaultSort.html" title='shardio::DefaultSort struct'>DefaultSort</a></td><td class='docblock-short'><p>Marker struct for sorting types that implement <code>Ord</code> in the order defined by their <code>Ord</code> impl.
+This sort order is used by default when writing, unless an alternative sort order is provided.</p>
 </td></tr><tr class='module-item'><td><a class="struct" href="struct.MergeIterator.html" title='shardio::MergeIterator struct'>MergeIterator</a></td><td class='docblock-short'><p>Iterator over merged shardio files</p>
 </td></tr><tr class='module-item'><td><a class="struct" href="struct.RangeIter.html" title='shardio::RangeIter struct'>RangeIter</a></td><td class='docblock-short'><p>Iterator of items from a single shardio reader</p>
 </td></tr><tr class='module-item'><td><a class="struct" href="struct.ShardReader.html" title='shardio::ShardReader struct'>ShardReader</a></td><td class='docblock-short'><p>Read from a collection of shardio files. The input data is merged to give
@@ -65,7 +81,7 @@ be created with the same sort order <code>S</code> as they are read with.</p>
 </td></tr><tr class='module-item'><td><a class="struct" href="struct.ShardSender.html" title='shardio::ShardSender struct'>ShardSender</a></td><td class='docblock-short'><p>A handle that is used to send data to a <code>ShardWriter</code>. Each thread that is producing data
 needs it's own ShardSender. A <code>ShardSender</code> can be obtained with the <code>get_sender</code> method of
 <code>ShardWriter</code>.  ShardSender implement clone.</p>
-</td></tr><tr class='module-item'><td><a class="struct" href="struct.ShardWriter.html" title='shardio::ShardWriter struct'>ShardWriter</a></td><td class='docblock-short'><p>Write a stream data items of type <code>T</code> to disk.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.ShardWriter.html" title='shardio::ShardWriter struct'>ShardWriter</a></td><td class='docblock-short'><p>Write a stream data items of type <code>T</code> to disk, in the sort order defined by <code>S</code>.</p>
 </td></tr></table><h2 id='traits' class='section-header'><a href="#traits">Traits</a></h2>
 <table><tr class='module-item'><td><a class="trait" href="trait.SortKey.html" title='shardio::SortKey trait'>SortKey</a></td><td class='docblock-short'><p>Specify a key function from data items of type <code>T</code> to a sort key of type <code>Key</code>.
 Impelment this trait to create a custom sort order.

@@ -1,12 +1,11 @@
 var N = null;var sourcesIndex = {};
 sourcesIndex["ansi_term"] = {"name":"","dirs":[],"files":["ansi.rs","debug.rs","difference.rs","display.rs","lib.rs","style.rs","windows.rs","write.rs"]};
 sourcesIndex["arrayvec"] = {"name":"","dirs":[],"files":["array.rs","array_string.rs","char.rs","errors.rs","lib.rs","maybe_uninit_nodrop.rs","range.rs"]};
-sourcesIndex["backtrace"] = {"name":"","dirs":[{"name":"backtrace","dirs":[],"files":["libunwind.rs","mod.rs"]},{"name":"symbolize","dirs":[],"files":["libbacktrace.rs","mod.rs"]}],"files":["capture.rs","dylib.rs","lib.rs","types.rs"]};
+sourcesIndex["backtrace"] = {"name":"","dirs":[{"name":"backtrace","dirs":[],"files":["libunwind.rs","mod.rs"]},{"name":"symbolize","dirs":[],"files":["libbacktrace.rs","mod.rs"]}],"files":["capture.rs","lib.rs","types.rs"]};
 sourcesIndex["backtrace_sys"] = {"name":"","dirs":[],"files":["lib.rs"]};
 sourcesIndex["bincode"] = {"name":"","dirs":[{"name":"de","dirs":[],"files":["mod.rs","read.rs"]},{"name":"ser","dirs":[],"files":["mod.rs"]}],"files":["config.rs","error.rs","internal.rs","lib.rs"]};
 sourcesIndex["byteorder"] = {"name":"","dirs":[],"files":["io.rs","lib.rs"]};
 sourcesIndex["cfg_if"] = {"name":"","dirs":[],"files":["lib.rs"]};
-sourcesIndex["crc32fast"] = {"name":"","dirs":[{"name":"specialized","dirs":[],"files":["mod.rs","pclmulqdq.rs"]}],"files":["baseline.rs","combine.rs","lib.rs","table.rs"]};
 sourcesIndex["crossbeam_channel"] = {"name":"","dirs":[{"name":"flavors","dirs":[],"files":["after.rs","array.rs","list.rs","mod.rs","never.rs","tick.rs","zero.rs"]}],"files":["channel.rs","context.rs","counter.rs","err.rs","lib.rs","select.rs","select_macro.rs","utils.rs","waker.rs"]};
 sourcesIndex["crossbeam_deque"] = {"name":"","dirs":[],"files":["lib.rs"]};
 sourcesIndex["crossbeam_epoch"] = {"name":"","dirs":[{"name":"sync","dirs":[],"files":["list.rs","mod.rs","queue.rs"]}],"files":["atomic.rs","collector.rs","default.rs","deferred.rs","epoch.rs","garbage.rs","guard.rs","internal.rs","lib.rs"]};
@@ -15,14 +14,12 @@ sourcesIndex["difference"] = {"name":"","dirs":[],"files":["display.rs","lcs.rs"
 sourcesIndex["either"] = {"name":"","dirs":[],"files":["lib.rs"]};
 sourcesIndex["failure"] = {"name":"","dirs":[{"name":"backtrace","dirs":[],"files":["internal.rs","mod.rs"]},{"name":"error","dirs":[],"files":["error_impl.rs","mod.rs"]}],"files":["as_fail.rs","box_std.rs","compat.rs","context.rs","error_message.rs","lib.rs","macros.rs","result_ext.rs","sync_failure.rs"]};
 sourcesIndex["failure_derive"] = {"name":"","dirs":[],"files":["lib.rs"]};
-sourcesIndex["flate2"] = {"name":"","dirs":[{"name":"deflate","dirs":[],"files":["bufread.rs","mod.rs","read.rs","write.rs"]},{"name":"gz","dirs":[],"files":["bufread.rs","mod.rs","read.rs","write.rs"]},{"name":"zlib","dirs":[],"files":["bufread.rs","mod.rs","read.rs","write.rs"]}],"files":["bufreader.rs","crc.rs","ffi.rs","lib.rs","mem.rs","zio.rs"]};
 sourcesIndex["lazy_static"] = {"name":"","dirs":[],"files":["inline_lazy.rs","lib.rs"]};
 sourcesIndex["libc"] = {"name":"","dirs":[{"name":"unix","dirs":[{"name":"notbsd","dirs":[{"name":"linux","dirs":[{"name":"other","dirs":[{"name":"b64","dirs":[],"files":["mod.rs","not_x32.rs","x86_64.rs"]}],"files":["align.rs","mod.rs"]}],"files":["align.rs","mod.rs"]}],"files":["mod.rs"]}],"files":["align.rs","mod.rs"]}],"files":["lib.rs","macros.rs"]};
 sourcesIndex["lz4"] = {"name":"","dirs":[{"name":"block","dirs":[],"files":["mod.rs"]}],"files":["decoder.rs","encoder.rs","lib.rs","liblz4.rs"]};
 sourcesIndex["lz4_sys"] = {"name":"","dirs":[],"files":["lib.rs"]};
 sourcesIndex["memoffset"] = {"name":"","dirs":[],"files":["lib.rs","offset_of.rs","span_of.rs"]};
 sourcesIndex["min_max_heap"] = {"name":"","dirs":[],"files":["hole.rs","index.rs","lib.rs"]};
-sourcesIndex["miniz_sys"] = {"name":"","dirs":[],"files":["lib.rs"]};
 sourcesIndex["nodrop"] = {"name":"","dirs":[],"files":["lib.rs"]};
 sourcesIndex["num_cpus"] = {"name":"","dirs":[],"files":["lib.rs"]};
 sourcesIndex["pretty_assertions"] = {"name":"","dirs":[],"files":["format_changeset.rs","lib.rs"]};
@@ -36,7 +33,7 @@ sourcesIndex["serde"] = {"name":"","dirs":[{"name":"de","dirs":[],"files":["from
 sourcesIndex["serde_derive"] = {"name":"","dirs":[{"name":"internals","dirs":[],"files":["ast.rs","attr.rs","case.rs","check.rs","ctxt.rs","mod.rs"]}],"files":["bound.rs","de.rs","dummy.rs","fragment.rs","lib.rs","pretend.rs","ser.rs","try.rs"]};
 sourcesIndex["shardio"] = {"name":"","dirs":[],"files":["helper.rs","lib.rs","pmap.rs","range.rs"]};
 sourcesIndex["smallvec"] = {"name":"","dirs":[],"files":["lib.rs"]};
-sourcesIndex["syn"] = {"name":"","dirs":[{"name":"gen","dirs":[],"files":["gen_helper.rs","visit.rs"]}],"files":["attr.rs","buffer.rs","data.rs","derive.rs","error.rs","export.rs","expr.rs","ext.rs","generics.rs","group.rs","ident.rs","keyword.rs","lib.rs","lifetime.rs","lit.rs","lookahead.rs","mac.rs","macros.rs","op.rs","parse.rs","parse_macro_input.rs","parse_quote.rs","path.rs","print.rs","punctuated.rs","span.rs","spanned.rs","thread.rs","token.rs","tt.rs","ty.rs"]};
+sourcesIndex["syn"] = {"name":"","dirs":[{"name":"gen","dirs":[],"files":["gen_helper.rs","visit.rs"]}],"files":["attr.rs","buffer.rs","custom_keyword.rs","custom_punctuation.rs","data.rs","derive.rs","error.rs","export.rs","expr.rs","ext.rs","generics.rs","group.rs","ident.rs","lib.rs","lifetime.rs","lit.rs","lookahead.rs","mac.rs","macros.rs","op.rs","parse.rs","parse_macro_input.rs","parse_quote.rs","path.rs","print.rs","punctuated.rs","sealed.rs","span.rs","spanned.rs","thread.rs","token.rs","tt.rs","ty.rs"]};
 sourcesIndex["synstructure"] = {"name":"","dirs":[],"files":["lib.rs","macros.rs"]};
 sourcesIndex["unicode_xid"] = {"name":"","dirs":[],"files":["lib.rs","tables.rs"]};
 createSourceSidebar();
