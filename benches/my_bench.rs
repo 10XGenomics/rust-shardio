@@ -3,12 +3,12 @@ extern crate serde_derive;
 
 #[macro_use]
 extern crate criterion;
-extern crate bincode;
-extern crate failure;
-extern crate fxhash;
-extern crate lz4;
-extern crate shardio;
-extern crate tempfile;
+use bincode;
+
+use fxhash;
+use lz4;
+
+use tempfile;
 
 use criterion::Criterion;
 use failure::Error;

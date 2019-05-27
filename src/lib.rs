@@ -78,17 +78,17 @@ extern crate serde_derive;
 #[macro_use]
 extern crate pretty_assertions;
 
-extern crate bincode;
-extern crate byteorder;
-extern crate libc;
-extern crate serde;
+
+
+
+
 
 #[macro_use]
 extern crate failure;
-extern crate crossbeam_channel;
-extern crate min_max_heap;
+use crossbeam_channel;
 
-extern crate lz4;
+
+use lz4;
 
 #[cfg(test)]
 extern crate tempfile;
@@ -291,7 +291,7 @@ impl<K: Ord + Serialize> FileManager<K> {
 /// ```
 pub trait SortKey<T> {
     type Key: Ord + Clone;
-    fn sort_key(t: &T) -> Cow<Self::Key>;
+    fn sort_key(t: &T) -> Cow<'_, Self::Key>;
 }
 
 /// Marker struct for sorting types that implement `Ord` in the order defined by their `Ord` impl.
@@ -302,7 +302,7 @@ where
     T: Ord + Clone,
 {
     type Key = T;
-    fn sort_key(t: &T) -> Cow<T> {
+    fn sort_key(t: &T) -> Cow<'_, T> {
         Cow::Borrowed(t)
     }
 }
@@ -800,11 +800,11 @@ where
         Ok(())
     }
 
-    pub fn iter_range(&self, range: &Range<<S as SortKey<T>>::Key>) -> Result<RangeIter<T, S>, Error> {
+    pub fn iter_range(&self, range: &Range<<S as SortKey<T>>::Key>) -> Result<RangeIter<'_, T, S>, Error> {
         RangeIter::new(&self, range.clone())
     }
 
-    fn iter_shard(&self, rec: &ShardRecord<<S as SortKey<T>>::Key>) -> Result<ShardIter<T, S>, Error> {
+    fn iter_shard(&self, rec: &ShardRecord<<S as SortKey<T>>::Key>) -> Result<ShardIter<'_, T, S>, Error> {
         ShardIter::new(self, rec.clone())
     }
 
@@ -877,7 +877,7 @@ where
         })
     }
 
-    pub(crate) fn current_key(&self) -> Cow<<S as SortKey<T>>::Key> {
+    pub(crate) fn current_key(&self) -> Cow<'_, <S as SortKey<T>>::Key> {
         self.next_item.as_ref().map(|a| S::sort_key(a)).unwrap()
     }
 
@@ -983,7 +983,7 @@ where
     }
 
     /// What key is next among the active set
-    fn peek_active_next(&self) -> Option<Cow<<S as SortKey<T>>::Key>> {
+    fn peek_active_next(&self) -> Option<Cow<'_, <S as SortKey<T>>::Key>> {
         let n = self.active_queue.peek_min();
         n.map(|v| v.current_key())
     }
@@ -1308,7 +1308,7 @@ mod shard_tests {
     struct FieldDSort;
     impl SortKey<T1> for FieldDSort {
         type Key = u8;
-        fn sort_key(item: &T1) -> Cow<u8> {
+        fn sort_key(item: &T1) -> Cow<'_, u8> {
             Cow::Borrowed(&item.d)
         }
     }
