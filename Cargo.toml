@@ -1,6 +1,6 @@
 [package]
 name = "shardio"
-version = "0.5.1"
+version = "0.5.2"
 authors = ["Patrick Marks <patrick@10xgenomics.com>", "Sreenath Krishnan <sreenath.krishnan@10xgenomics.com>", "Lance Hepler <lance.hepler@10xgenomics.com>"]
 edition = "2018"
 license = "MIT"
@@ -15,22 +15,22 @@ keywords = ["serde", "serialization", "map-reduce", "out-of-memory"]
 full-test = []
 
 [dependencies]
-serde = "*"
-serde_derive = "*"
-bincode = ">=1.0"
-byteorder = "*"
-libc = "*"
-lz4 = "*"
+serde = "1"
+serde_derive = "1"
+bincode = "1.1"
+byteorder = "1.3.0"
+libc = "0.2"
+lz4 = "1"
 failure = "0.1.5"
 crossbeam-channel = "0.3.8"
-failure_derive = "*"
+failure_derive = "0.1"
 min-max-heap = "1.2.2"
 
 [dev-dependencies]
-tempfile = "*"
+tempfile = "3.0"
 criterion = "0.2.3"
-fxhash = "*"
-lazy_static = "*"
+fxhash = "0.2.1"
+lazy_static = "1.2"
 pretty_assertions = "0.5.1"
 
 [[bench]]
