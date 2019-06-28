@@ -132,14 +132,14 @@ fn read_at(fd: &RawFd, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
     let mut total = 0usize;
 
     while total < buf.len() {
-        let bytes = r#try!(catch_err(unsafe {
+        let bytes = catch_err(unsafe {
             pread(
                 *fd,
                 buf.as_mut_ptr().offset(total as isize) as *mut c_void,
                 (buf.len() - total) as size_t,
                 (pos + total as u64) as off_t,
             )
-        }));
+        })?;
 
         if bytes == 0 {
             return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
@@ -171,14 +171,14 @@ fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> io::Result<usize> {
         //    return Err(io::Error::from(io::ErrorKind::NotConnected));
         //}
 
-        let bytes = r#try!(catch_err(unsafe {
+        let bytes = catch_err(unsafe {
             pwrite(
                 *fd,
                 buf.as_ptr().offset(total as isize) as *const c_void,
                 (buf.len() - total) as size_t,
                 (pos + total as u64) as off_t,
             )
-        }));
+        })?;
 
         if bytes == 0 {
             return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
@@ -734,7 +734,6 @@ where
     file: File,
     index: Vec<ShardRecord<<S as SortKey<T>>::Key>>,
     p1: PhantomData<T>,
-    // p2: PhantomData<S>,
 }
 
 impl<T, S> ShardReaderSingle<T, S>
@@ -774,6 +773,7 @@ where
         lz4::Decoder::new(buffer.as_slice()).unwrap()
     }
 
+    /// Read values in with the given `range` of keys into `data`, using temporary buffer `buf` to read the compressed data into.
     pub fn read_range(
         &self,
         range: &Range<<S as SortKey<T>>::Key>,
@@ -803,6 +803,7 @@ where
         Ok(())
     }
 
+    /// Return an iterator over the items in the given `range` of keys.
     pub fn iter_range(
         &self,
         range: &Range<<S as SortKey<T>>::Key>,
@@ -817,6 +818,7 @@ where
         ShardIter::new(self, rec.clone())
     }
 
+    /// Total number of values held by this reader
     pub fn len(&self) -> usize {
         self.index.iter().map(|x| x.len_items).sum()
     }
