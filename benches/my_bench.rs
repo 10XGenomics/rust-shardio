@@ -125,14 +125,14 @@ fn main() {
 
     fn direct(size: usize) -> Result<(), Error> {
         let mut tf = getf();
-        tf.write(&DATA[0..size]);
+        tf.write(&DATA[0..size])?;
         Ok(())
     }
 
     fn lz4_only(size: usize) -> Result<(), Error> {
         let tf = getf();
         let mut fo = lz4::EncoderBuilder::new().build(tf)?;
-        fo.write(&DATA[0..size]);
+        fo.write(&DATA[0..size])?;
         fo.finish().1?;
         Ok(())
     }
@@ -140,7 +140,7 @@ fn main() {
     fn bincode_only(size: usize) -> Result<(), Error> {
         let tf = getf();
         let n = size / std::mem::size_of::<T1>();
-        bincode::serialize_into(tf, &D2[0..n]);
+        bincode::serialize_into(tf, &D2[0..n])?;
         Ok(())
     }
 
@@ -148,7 +148,7 @@ fn main() {
         let tf = tempfile::tempfile()?;
         let fo = lz4::EncoderBuilder::new().build(tf)?;
         let n = size / std::mem::size_of::<T1>();
-        bincode::serialize_into(fo, &D2[0..n]);
+        bincode::serialize_into(fo, &D2[0..n])?;
         Ok(())
     }
 
@@ -157,9 +157,9 @@ fn main() {
         let mut fo = lz4::EncoderBuilder::new().build(tf)?;
         let n = size / std::mem::size_of::<T1>();
         let mut buf = Vec::new();
-        bincode::serialize_into(&mut buf, &D2[0..n]);
+        bincode::serialize_into(&mut buf, &D2[0..n])?;
 
-        fo.write(&buf);
+        fo.write(&buf)?;
         Ok(())
     }
 

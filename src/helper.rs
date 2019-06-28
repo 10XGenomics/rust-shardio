@@ -59,6 +59,7 @@ impl<T: 'static + Send> ThreadProxyIterator<T> {
     }
 }
 
+/// Proxy writes to a background thread
 pub struct ThreadProxyWriter<T: Send + Write> {
     buf_size: usize,
     buf: Vec<u8>,
@@ -68,6 +69,8 @@ pub struct ThreadProxyWriter<T: Send + Write> {
 }
 
 impl<T: 'static + Send + Write> ThreadProxyWriter<T> {
+
+    /// Create a new `ThreadProxyWriter` that will write to `writer` on a newly created thread
     pub fn new(mut writer: T, buffer_size: usize) -> ThreadProxyWriter<T> {
         let (tx, rx) = bounded::<Option<Vec<u8>>>(10);
 

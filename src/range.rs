@@ -3,7 +3,7 @@
 use crate::ShardRecord;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Rorder {
+pub(crate) enum Rorder {
     Before,
     Intersects,
     After,
@@ -13,7 +13,10 @@ pub enum Rorder {
 /// of `None` indicates that the interval is unbounded in that direction.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct Range<K> {
+    /// Start of interval
     pub start: Option<K>,
+
+    /// Inclusive end of interval
     pub end: Option<K>,
 }
 
@@ -83,7 +86,7 @@ impl<K: Ord + Clone> Range<K> {
         }
     }
 
-    pub fn cmp(&self, point: &K) -> Rorder {
+    pub(crate) fn cmp(&self, point: &K) -> Rorder {
         if self.contains(point) {
             Rorder::Intersects
         } else if self.start.as_ref().map_or(false, |ref s| point < &s) {

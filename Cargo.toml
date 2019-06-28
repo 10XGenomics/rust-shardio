@@ -19,7 +19,6 @@ lz4 = "*"
 failure = "0.1.5"
 crossbeam-channel = "0.3.8"
 failure_derive = "*"
-pretty_assertions = "0.5.1"
 min-max-heap = "1.2.2"
 
 [dev-dependencies]
@@ -27,6 +26,7 @@ tempfile = "*"
 criterion = "0.2.3"
 fxhash = "*"
 lazy_static = "*"
+pretty_assertions = "0.5.1"
 
 [[bench]]
 name = "my_bench"

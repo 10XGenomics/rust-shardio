@@ -72,20 +72,14 @@
 //! }
 //! ```
 
-#[macro_use]
-extern crate serde_derive;
+#![deny(missing_docs)]
 
-#[macro_use]
-extern crate pretty_assertions;
-
-#[macro_use]
-extern crate failure;
 use crossbeam_channel;
-
 use lz4;
 
-#[cfg(test)]
-extern crate tempfile;
+#[macro_use] 
+extern crate serde_derive;
+use serde::{Serialize, de::DeserializeOwned};
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -101,22 +95,23 @@ use std::marker::PhantomData;
 use std::thread;
 use std::thread::JoinHandle;
 
-use serde::de::DeserializeOwned;
-use serde::ser::Serialize;
 
 use bincode::{deserialize_from, serialize_into};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use libc::{c_void, off_t, pread, pwrite, size_t, ssize_t};
 
-use failure::Error;
+use failure::{format_err, Error};
 
-pub mod pmap;
+
+/// Represent a range of key space
 pub mod range;
-use crate::range::Rorder;
+
+/// Helper methods
 pub mod helper;
 
 pub use crate::range::Range;
+use range::Rorder;
 
 fn catch_err(e: ssize_t) -> io::Result<usize> {
     if e == -1 as ssize_t {
@@ -279,7 +274,11 @@ impl<K: Ord + Serialize> FileManager<K> {
 /// }
 /// ```
 pub trait SortKey<T> {
+
+    /// The type of the key that will be sorted.
     type Key: Ord + Clone;
+
+    /// Compute the sort key for value `t`.
     fn sort_key(t: &T) -> Cow<'_, Self::Key>;
 }
 
@@ -597,11 +596,6 @@ where
         Ok(n_items)
     }
 
-    fn get_encoder(buffer: &mut Vec<u8>) -> Result<lz4::Encoder<&mut Vec<u8>>, Error> {
-        let buf = lz4::EncoderBuilder::new().build(buffer)?;
-        Ok(buf)
-    }
-
     fn write_chunk(&mut self, items: &[T]) -> Result<usize, Error> {
         self.serialize_buffer.clear();
         self.compress_buffer.clear();
@@ -616,9 +610,10 @@ where
 
         {
             use std::io::Write;
-            let mut encoder = Self::get_encoder(&mut self.compress_buffer)?;
+            let mut encoder = lz4::EncoderBuilder::new().build(&mut self.compress_buffer)?;
             encoder.write(&self.serialize_buffer)?;
-            encoder.finish();
+            let (_, result) = encoder.finish();
+            result?;
         }
 
         self.writer
@@ -954,7 +949,7 @@ where
 pub struct RangeIter<'a, T, S>
 where
     T: 'a,
-    S: 'a + SortKey<T>,
+    S: SortKey<T>,
     <S as SortKey<T>>::Key: 'a + Ord + Clone,
 {
     reader: &'a ShardReaderSingle<T, S>,
@@ -1327,6 +1322,7 @@ mod shard_tests {
     use std::iter::{repeat, FromIterator};
     use std::u8;
     use tempfile;
+    use pretty_assertions::assert_eq;
 
     #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord, Hash)]
     struct T1 {
