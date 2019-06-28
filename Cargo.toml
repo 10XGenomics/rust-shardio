@@ -1,6 +1,6 @@
 [package]
 name = "shardio"
-version = "0.5.2"
+version = "0.5.3"
 authors = ["Patrick Marks <patrick@10xgenomics.com>", "Sreenath Krishnan <sreenath.krishnan@10xgenomics.com>", "Lance Hepler <lance.hepler@10xgenomics.com>"]
 edition = "2018"
 license = "MIT"
@@ -8,6 +8,7 @@ description = "Out-of-memory sorting and streaming of large datasets"
 documentation = "https://10xgenomics.github.io/rust-shardio"
 repository = "https://github.com/10XGenomics/rust-shardio"
 keywords = ["serde", "serialization", "map-reduce", "out-of-memory"]
+readme = "README.md"
 
 [features]
 # Switch on the 'full-test' feature (in release mode), to enable 
