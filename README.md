@@ -1,6 +1,6 @@
 # rust-shardio
 
-[![Coverage Status](https://coveralls.io/repos/github/sreenathkrishnan/rust-shardio/badge.svg)](https://coveralls.io/github/sreenathkrishnan/rust-shardio)
+[![Coverage Status](https://coveralls.io/repos/github/10XGenomics/rust-shardio/badge.svg)](https://coveralls.io/github/10XGenomics/rust-shardio)
 
 Library for handling out-of-memory sorting of large datasets which need to be processed in multiple passes map / sort / reduce passes. 
 
