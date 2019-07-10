@@ -1,6 +1,11 @@
 # rust-shardio
 
+[![Crates.io Downloads](https://img.shields.io/crates/d/shardio.svg)](https://crates.io/crates/shardio)
+[![Crates.io Version](https://img.shields.io/crates/v/shardio.svg)](https://crates.io/crates/shardio)
+[![Crates.io License](https://img.shields.io/crates/l/shardio.svg)](https://crates.io/crates/shardio)
+[![Build Status](https://travis-ci.org/10XGenomics/rust-shardio.svg?branch=master)](https://travis-ci.org/10XGenomics/rust-shardio)
 [![Coverage Status](https://coveralls.io/repos/github/10XGenomics/rust-shardio/badge.svg)](https://coveralls.io/github/10XGenomics/rust-shardio)
+[![API Docs](https://img.shields.io/badge/API-Docs-blue.svg)](https://10xgenomics.github.io/rust-shardio)
 
 Library for handling out-of-memory sorting of large datasets which need to be processed in multiple passes map / sort / reduce passes. 
 
