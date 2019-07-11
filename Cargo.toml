@@ -33,6 +33,9 @@ criterion = "0.2.3"
 fxhash = "0.2.1"
 lazy_static = "1.2"
 pretty_assertions = "0.5.1"
+quickcheck = "0.8.5"
+rand = "0.6.5"
+is_sorted = "0.1"
 
 [[bench]]
 name = "my_bench"

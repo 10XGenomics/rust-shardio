@@ -1323,6 +1323,9 @@ mod shard_tests {
     use std::u8;
     use tempfile;
     use pretty_assertions::assert_eq;
+    use quickcheck::{QuickCheck, Arbitrary, Gen, StdThreadGen};
+    use rand::Rng;
+    use is_sorted::IsSorted;
 
     #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord, Hash)]
     struct T1 {
@@ -1330,6 +1333,17 @@ mod shard_tests {
         b: u32,
         c: u16,
         d: u8,
+    }
+
+    impl Arbitrary for T1 {
+        fn arbitrary<G: Gen>(g: &mut G) -> T1 {
+            T1 { 
+                a: g.gen(), 
+                b: g.gen(),
+                c: g.gen(),
+                d: g.gen(),
+            }
+        }
     }
 
     struct FieldDSort;
@@ -1483,6 +1497,85 @@ mod shard_tests {
 
         Ok(())
     }
+
+    // newtype for generating Vec<Vec<T>>, with a not-too-big number of outer vectors
+    #[derive(Clone, Debug)]
+    struct MultiSlice<T>(Vec<Vec<T>>);
+
+    impl<T: Arbitrary> Arbitrary for MultiSlice<T> {
+        fn arbitrary<G: Gen>(g: &mut G) -> MultiSlice<T> {
+            let slices = (g.next_u32() % 32) as usize;
+
+            let mut data = Vec::new();
+
+            for _ in 0 .. slices {
+                let slice = Vec::<T>::arbitrary(g);
+                data.push(slice);
+            }
+
+            MultiSlice(data)
+        }
+    }
+
+
+    fn test_multi_slice<T, S>(items: MultiSlice<T>, disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize) -> Result<Vec<T>, Error> 
+    where
+        T: 'static + Serialize + DeserializeOwned + Clone + Send,
+        S: SortKey<T>,
+        <S as SortKey<T>>::Key: 'static + Send + Serialize + DeserializeOwned,
+    {
+
+        let mut files = Vec::new();
+
+        for item_chunk in &items.0 {
+            let tmp = tempfile::NamedTempFile::new()?;
+
+            let writer: ShardWriter<T, S> = ShardWriter::new(
+                                    tmp.path(),
+                                    producer_chunk_size,
+                                    disk_chunk_size,
+                                    buffer_size)?;
+        
+        
+            let mut sender = writer.get_sender();
+            for item in item_chunk {
+                sender.send(item.clone())?;
+            }
+
+            files.push(tmp);
+        }
+
+        let reader = ShardReader::<T,S>::open_set(&files)?;
+        let mut out_items = Vec::new();
+
+        for r in reader.iter()? {
+            out_items.push(r?);
+        }
+
+        Ok(out_items)
+    }
+
+
+    #[test]
+    fn multi_slice_correctness_quickcheck() {
+
+        fn check_t1(v: MultiSlice<T1>) -> bool {
+            let sorted = test_multi_slice::<T1, FieldDSort>(v.clone(), 1024, 1<<17, 16).unwrap();
+
+            let mut vall = Vec::new();
+            for chunk in v.0 {
+                vall.extend(chunk);
+            }
+
+            if sorted.len() != vall.len() { return false; }
+            if !set_compare(&sorted, &vall) { return false; }
+            IsSorted::is_sorted_by_key(&mut sorted.iter(), |x| FieldDSort::sort_key(x).into_owned())
+        }
+
+
+        QuickCheck::with_gen(StdThreadGen::new(500000)).tests(4).quickcheck(check_t1 as fn(MultiSlice<T1>) -> bool);
+    }
+    
 
     fn check_round_trip(
         disk_chunk_size: usize,
