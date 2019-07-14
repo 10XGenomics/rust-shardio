@@ -41,6 +41,9 @@
 //!             sender.send(DataStruct { a: (i%25) as u64, b: (i%100) as u32 });
 //!         }
 //!
+//!         // done sending items
+//!         sender.finished();
+//!
 //!         // Write errors are accessible by calling the finish() method
 //!         writer.finish()?;
 //!     }
@@ -302,7 +305,8 @@ where
 /// flush remaining items to disk, write an index of the chunk data and close the file.
 ///
 /// The `get_sender()` methods returns a `ShardSender` that must be used to send items to the writer.
-/// You must close each ShardSender by calling its `finish()` method, or data may be lost.
+/// You must close each ShardSender by dropping it or calling its `finish()` method, or data may be lost.
+/// The `ShardSender` must be dropped/finished prior to callinng `SharWriter::finish` or dropping the shard writer.
 ///
 /// # Sorting
 /// Items are sorted according to the `Ord` implementation of type `S::Key`. Type `S`, implementing the `SortKey` trait
@@ -692,7 +696,8 @@ impl<T: Send> ShardSender<T> {
     }
 
     /// Signal that you've finished sending items to this `ShardSender`. `finished` will called
-    /// if the `ShardSender` is dropped.
+    /// if the `ShardSender` is dropped. You must call `finished()` or drop the `ShardSender`
+    /// prior to calling `ShardWriter::finish` or dropping the ShardWriter, or you will get a panic.
     pub fn finished(&mut self) {
         if !self.buffer.is_empty() {
             let mut send_buf = Vec::new();
