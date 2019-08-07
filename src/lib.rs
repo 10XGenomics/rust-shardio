@@ -4,6 +4,11 @@
 //! Data is written to sorted chunks. When reading shardio will merge the data on the fly into a single sorted view. You can
 //! also procss disjoint subsets of sorted data.
 //!
+//! Shardio storage is intended for transient use within a single processing task, not for archival purposes.
+//! You can't read shardio files created by binaries for a different Rust version,
+//! or where type definitions have changed. It recommended
+//! to only use interact with a shardio file from a single Rust binary.
+//!
 //! ```rust
 //! #[macro_use]
 //! extern crate serde_derive;
@@ -75,37 +80,32 @@
 //! }
 //! ```
 
+#![deny(warnings)]
 #![deny(missing_docs)]
 
-use crossbeam_channel;
-use lz4;
-
-#[macro_use] 
-extern crate serde_derive;
-use serde::{Serialize, de::DeserializeOwned};
-
+use std::any::{Any, TypeId};
 use std::borrow::Cow;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeSet;
 use std::fs::File;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::io::{self, Seek, SeekFrom};
-use std::os::unix::io::{AsRawFd, RawFd};
-
-use crossbeam_channel::{bounded, Receiver, Sender};
-use std::path::Path;
-
-use min_max_heap::MinMaxHeap;
 use std::marker::PhantomData;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::path::Path;
 use std::thread;
 use std::thread::JoinHandle;
 
-
+use crossbeam_channel;
+use lz4;
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use bincode::{deserialize_from, serialize_into};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-
-use libc::{c_void, off_t, pread, pwrite, size_t, ssize_t};
-
+use crossbeam_channel::{bounded, Receiver, Sender};
 use failure::{format_err, Error};
-
+use libc::{c_void, off_t, pread, pwrite, size_t, ssize_t};
+use min_max_heap::MinMaxHeap;
 
 /// Represent a range of key space
 pub mod range;
@@ -277,7 +277,6 @@ impl<K: Ord + Serialize> FileManager<K> {
 /// }
 /// ```
 pub trait SortKey<T> {
-
     /// The type of the key that will be sorted.
     type Key: Ord + Clone;
 
@@ -328,7 +327,7 @@ struct ShardWriterHelper<T> {
 impl<T, S> ShardWriter<T, S>
 where
     T: 'static + Send + Serialize,
-    S: SortKey<T>,
+    S: 'static + SortKey<T>,
     <S as SortKey<T>>::Key: 'static + Send + Ord + Serialize + Clone,
 {
     /// Create a writer for storing data items of type `T`.
@@ -529,6 +528,20 @@ where
     }
 }
 
+/// Get a hash of the data and sort types -- used
+/// to validate that we're reading the correct types.
+fn get_type_hash<T: Any, S: Any>() -> u64 {
+    let mut hasher = DefaultHasher::new();
+
+    let typeid = TypeId::of::<T>();
+    typeid.hash(&mut hasher);
+
+    let typeid = TypeId::of::<S>();
+    typeid.hash(&mut hasher);
+
+    hasher.finish()
+}
+
 /// Sort buffered items, break large buffer into chunks.
 /// Serialize, compress and write the each chunk. The
 /// file manager maintains the index data.
@@ -548,8 +561,8 @@ where
 
 impl<T, S> ShardWriterThread<T, S>
 where
-    T: Send + Serialize,
-    S: SortKey<T>,
+    T: Any + Send + Serialize,
+    S: Any + SortKey<T>,
     <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
     fn new(
@@ -628,6 +641,8 @@ where
     fn write_index_block(&mut self) -> Result<(), Error> {
         let mut buf = Vec::new();
 
+        // write the type hash to allow checking a read-time
+        serialize_into(&mut buf, &get_type_hash::<T, S>())?;
         serialize_into(&mut buf, &self.writer.regions)?;
 
         let index_block_position = self.writer.cursor;
@@ -738,35 +753,36 @@ where
 
 impl<T, S> ShardReaderSingle<T, S>
 where
-    T: DeserializeOwned,
-    S: SortKey<T>,
+    T: Any + DeserializeOwned,
+    S: Any + SortKey<T>,
     <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
 {
-    /// Open a shard file that stores `T` items.
+    /// Open a shard file that stores `T` items. Will panic if `T` and `S` don't have the same
+    /// `TypeId` as those used when the file was written. This means that you can't read
+    /// shardio files created by binaries for a different Rust version, or with different
+    /// definitions of `T` and `S`.
     fn open<P: AsRef<Path>>(path: P) -> Result<ShardReaderSingle<T, S>, Error> {
-        let mut f = File::open(path).unwrap();
+        let mut file = File::open(path).unwrap();
 
-        let mut index = Self::read_index_block(&mut f)?;
-        index.sort();
-
-        Ok(ShardReaderSingle {
-            file: f,
-            index,
-            p1: PhantomData,
-        })
-    }
-
-    /// Read shard index
-    fn read_index_block(
-        file: &mut File,
-    ) -> Result<Vec<ShardRecord<<S as SortKey<T>>::Key>>, Error> {
         let _ = file.seek(SeekFrom::End(-24))?;
         let _num_shards = file.read_u64::<BigEndian>()? as usize;
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position as u64))?;
 
-        Ok(deserialize_from(file)?)
+        let type_hash: u64 = deserialize_from(&mut file)?;
+
+        // validate that we're using the correct types to deserialize.
+        assert_eq!(type_hash, get_type_hash::<T, S>());
+
+        let mut index: Vec<ShardRecord<<S as SortKey<T>>::Key>> = deserialize_from(&mut file)?;
+        index.sort();
+
+        Ok(ShardReaderSingle {
+            file,
+            index,
+            p1: PhantomData,
+        })
     }
 
     fn get_decoder(buffer: &mut Vec<u8>) -> lz4::Decoder<&[u8]> {
@@ -965,8 +981,8 @@ where
 
 impl<'a, T, S> RangeIter<'a, T, S>
 where
-    T: DeserializeOwned,
-    S: SortKey<T>,
+    T: Any + DeserializeOwned,
+    S: Any + SortKey<T>,
     <S as SortKey<T>>::Key: 'a + Clone + Ord + DeserializeOwned,
 {
     fn new(
@@ -1042,8 +1058,8 @@ fn transpose<T, E>(v: Option<Result<T, E>>) -> Result<Option<T>, E> {
 
 impl<'a, T, S> Iterator for RangeIter<'a, T, S>
 where
-    T: DeserializeOwned,
-    S: SortKey<T>,
+    T: Any + DeserializeOwned,
+    S: Any + SortKey<T>,
     <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
 {
     type Item = Result<T, Error>;
@@ -1200,9 +1216,9 @@ where
 
 impl<T, S> ShardReader<T, S>
 where
-    T: DeserializeOwned,
+    T: Any + DeserializeOwned,
     <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
-    S: SortKey<T>,
+    S: Any + SortKey<T>,
 {
     /// Open a single shard files into reader
     pub fn open<P: AsRef<Path>>(shard_file: P) -> Result<ShardReader<T, S>, Error> {
@@ -1321,16 +1337,16 @@ where
 #[cfg(test)]
 mod shard_tests {
     use super::*;
+    use is_sorted::IsSorted;
+    use pretty_assertions::assert_eq;
+    use quickcheck::{Arbitrary, Gen, QuickCheck, StdThreadGen};
+    use rand::Rng;
     use std::collections::HashSet;
     use std::fmt::Debug;
     use std::hash::Hash;
     use std::iter::{repeat, FromIterator};
     use std::u8;
     use tempfile;
-    use pretty_assertions::assert_eq;
-    use quickcheck::{QuickCheck, Arbitrary, Gen, StdThreadGen};
-    use rand::Rng;
-    use is_sorted::IsSorted;
 
     #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord, Hash)]
     struct T1 {
@@ -1342,8 +1358,8 @@ mod shard_tests {
 
     impl Arbitrary for T1 {
         fn arbitrary<G: Gen>(g: &mut G) -> T1 {
-            T1 { 
-                a: g.gen(), 
+            T1 {
+                a: g.gen(),
                 b: g.gen(),
                 c: g.gen(),
                 d: g.gen(),
@@ -1513,7 +1529,7 @@ mod shard_tests {
 
             let mut data = Vec::new();
 
-            for _ in 0 .. slices {
+            for _ in 0..slices {
                 let slice = Vec::<T>::arbitrary(g);
                 data.push(slice);
             }
@@ -1522,26 +1538,29 @@ mod shard_tests {
         }
     }
 
-
-    fn test_multi_slice<T, S>(items: MultiSlice<T>, disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize) -> Result<Vec<T>, Error> 
+    fn test_multi_slice<T, S>(
+        items: MultiSlice<T>,
+        disk_chunk_size: usize,
+        producer_chunk_size: usize,
+        buffer_size: usize,
+    ) -> Result<Vec<T>, Error>
     where
         T: 'static + Serialize + DeserializeOwned + Clone + Send,
-        S: SortKey<T>,
+        S: 'static + SortKey<T>,
         <S as SortKey<T>>::Key: 'static + Send + Serialize + DeserializeOwned,
     {
-
         let mut files = Vec::new();
 
         for item_chunk in &items.0 {
             let tmp = tempfile::NamedTempFile::new()?;
 
             let writer: ShardWriter<T, S> = ShardWriter::new(
-                                    tmp.path(),
-                                    producer_chunk_size,
-                                    disk_chunk_size,
-                                    buffer_size)?;
-        
-        
+                tmp.path(),
+                producer_chunk_size,
+                disk_chunk_size,
+                buffer_size,
+            )?;
+
             let mut sender = writer.get_sender();
             for item in item_chunk {
                 sender.send(item.clone())?;
@@ -1550,7 +1569,7 @@ mod shard_tests {
             files.push(tmp);
         }
 
-        let reader = ShardReader::<T,S>::open_set(&files)?;
+        let reader = ShardReader::<T, S>::open_set(&files)?;
         let mut out_items = Vec::new();
 
         for r in reader.iter()? {
@@ -1560,27 +1579,29 @@ mod shard_tests {
         Ok(out_items)
     }
 
-
     #[test]
     fn multi_slice_correctness_quickcheck() {
-
         fn check_t1(v: MultiSlice<T1>) -> bool {
-            let sorted = test_multi_slice::<T1, FieldDSort>(v.clone(), 1024, 1<<17, 16).unwrap();
+            let sorted = test_multi_slice::<T1, FieldDSort>(v.clone(), 1024, 1 << 17, 16).unwrap();
 
             let mut vall = Vec::new();
             for chunk in v.0 {
                 vall.extend(chunk);
             }
 
-            if sorted.len() != vall.len() { return false; }
-            if !set_compare(&sorted, &vall) { return false; }
+            if sorted.len() != vall.len() {
+                return false;
+            }
+            if !set_compare(&sorted, &vall) {
+                return false;
+            }
             IsSorted::is_sorted_by_key(&mut sorted.iter(), |x| FieldDSort::sort_key(x).into_owned())
         }
 
-
-        QuickCheck::with_gen(StdThreadGen::new(500000)).tests(4).quickcheck(check_t1 as fn(MultiSlice<T1>) -> bool);
+        QuickCheck::with_gen(StdThreadGen::new(500000))
+            .tests(4)
+            .quickcheck(check_t1 as fn(MultiSlice<T1>) -> bool);
     }
-    
 
     fn check_round_trip(
         disk_chunk_size: usize,

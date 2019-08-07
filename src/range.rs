@@ -1,5 +1,6 @@
 // Copyright (c) 2018 10x Genomics, Inc. All rights reserved.
 
+use serde::{Serialize, Deserialize};
 use crate::ShardRecord;
 
 #[derive(Debug, PartialEq, Eq)]
