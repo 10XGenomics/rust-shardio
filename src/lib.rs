@@ -93,15 +93,15 @@ use std::path::Path;
 use std::thread;
 use std::thread::JoinHandle;
 
-use crossbeam_channel;
-use lz4;
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use bincode::{deserialize_from, serialize_into};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use crossbeam_channel;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use failure::{format_err, Error};
 use libc::{c_void, off_t, pread, pwrite, size_t, ssize_t};
+use lz4;
 use min_max_heap::MinMaxHeap;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// Represent a range of key space
 pub mod range;

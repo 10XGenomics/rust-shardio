@@ -1,7 +1,7 @@
 // Copyright (c) 2018 10x Genomics, Inc. All rights reserved.
 
-use serde::{Serialize, Deserialize};
 use crate::ShardRecord;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Rorder {
