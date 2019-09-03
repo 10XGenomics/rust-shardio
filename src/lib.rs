@@ -10,11 +10,7 @@
 //! to only use interact with a shardio file from a single Rust binary.
 //!
 //! ```rust
-//! #[macro_use]
-//! extern crate serde_derive;
-//!
-//! extern crate shardio;
-//! extern crate failure;
+//! use serde::{Serialize, Deserialize};
 //! use shardio::*;
 //! use std::fs::File;
 //! use failure::Error;
