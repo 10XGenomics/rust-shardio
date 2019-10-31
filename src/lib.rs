@@ -793,18 +793,13 @@ where
             );
         } else {
             // if compiler version is the same, type misnaming is an error
-            if t_typ != type_name::<T>() {
+            if t_typ != type_name::<T>() || s_typ != type_name::<S>() {
                 return Err(format_err!(
-                    "expected shardio type {}, got {}",
+                    "Expected type {} with sort order {}, but got type {} with sort order {}",
                     type_name::<T>(),
-                    t_typ
-                ));
-            }
-            if s_typ != type_name::<S>() {
-                return Err(format_err!(
-                    "expected shardio sort {}, got {}",
                     type_name::<S>(),
-                    s_typ
+                    t_typ,
+                    s_typ,
                 ));
             }
         }
