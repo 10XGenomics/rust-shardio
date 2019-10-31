@@ -791,20 +791,22 @@ where
                 version(),
                 ver
             );
-        }
-        if ver == version() && t_typ != type_name::<T>() {
-            return Err(format_err!(
-                "expected shardio type {}, got {}",
-                type_name::<T>(),
-                t_typ
-            ));
-        }
-        if ver == version() && s_typ != type_name::<S>() {
-            return Err(format_err!(
-                "expected shardio sort {}, got {}",
-                type_name::<S>(),
-                s_typ
-            ));
+        } else {
+            // if compiler version is the same, type misnaming is an error
+            if t_typ != type_name::<T>() {
+                return Err(format_err!(
+                    "expected shardio type {}, got {}",
+                    type_name::<T>(),
+                    t_typ
+                ));
+            }
+            if s_typ != type_name::<S>() {
+                return Err(format_err!(
+                    "expected shardio sort {}, got {}",
+                    type_name::<S>(),
+                    s_typ
+                ));
+            }
         }
         Ok(recs)
     }
