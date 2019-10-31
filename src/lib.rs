@@ -100,12 +100,16 @@ use std::marker::PhantomData;
 use std::thread;
 use std::thread::JoinHandle;
 
-use bincode::{deserialize_from, serialize_into};
+use bincode::serialize_into;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use libc::{c_void, off_t, pread, pwrite, size_t, ssize_t};
 
 use failure::{format_err, Error};
+
+use log::warn;
+use rustc_version_runtime::version;
+use semver::Version;
 
 /// Represent a range of key space
 pub mod range;
@@ -629,7 +633,12 @@ where
 
         serialize_into(
             &mut buf,
-            &(type_name::<T>(), type_name::<S>(), &self.writer.regions),
+            &(
+                version(),
+                type_name::<T>(),
+                type_name::<S>(),
+                &self.writer.regions,
+            ),
         )?;
 
         let index_block_position = self.writer.cursor;
@@ -735,6 +744,7 @@ where
 {
     file: File,
     index: Vec<ShardRecord<<S as SortKey<T>>::Key>>,
+    binconfig: bincode::Config,
     p1: PhantomData<T>,
 }
 
@@ -748,12 +758,17 @@ where
     fn open<P: AsRef<Path>>(path: P) -> Result<ShardReaderSingle<T, S>, Error> {
         let mut f = File::open(path).unwrap();
 
-        let mut index = Self::read_index_block(&mut f)?;
+        let mut binconfig = bincode::config();
+        // limit ourselves to decoding no more than 268MB at a time
+        binconfig.limit(1 << 28);
+
+        let mut index = Self::read_index_block(&mut f, &binconfig)?;
         index.sort();
 
         Ok(ShardReaderSingle {
             file: f,
             index,
+            binconfig,
             p1: PhantomData,
         })
     }
@@ -761,22 +776,30 @@ where
     /// Read shard index
     fn read_index_block(
         file: &mut File,
+        binconfig: &bincode::Config,
     ) -> Result<Vec<ShardRecord<<S as SortKey<T>>::Key>>, Error> {
         let _ = file.seek(SeekFrom::End(-24))?;
         let _num_shards = file.read_u64::<BigEndian>()? as usize;
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position as u64))?;
-        let (t_typ, s_typ, recs): (String, String, Vec<ShardRecord<<S as SortKey<T>>::Key>>) =
-            deserialize_from(file)?;
-        if t_typ != type_name::<T>() {
+        let (ver, t_typ, s_typ, recs): (Version, String, String, _) =
+            binconfig.deserialize_from(file)?;
+        if ver != version() {
+            warn!(
+                "expected compiler version {}, got {}; types may be incompatible",
+                version(),
+                ver
+            );
+        }
+        if ver == version() && t_typ != type_name::<T>() {
             return Err(format_err!(
                 "expected shardio type {}, got {}",
                 type_name::<T>(),
                 t_typ
             ));
         }
-        if s_typ != type_name::<S>() {
+        if ver == version() && s_typ != type_name::<S>() {
             return Err(format_err!(
                 "expected shardio sort {}, got {}",
                 type_name::<S>(),
@@ -812,7 +835,7 @@ where
             assert_eq!(read_len, rec.len_bytes);
 
             let mut decoder = Self::get_decoder(buf);
-            let r: Vec<T> = deserialize_from(&mut decoder)?;
+            let r: Vec<T> = self.binconfig.deserialize_from(&mut decoder)?;
             data.extend(r.into_iter().filter(|x| range.contains(&S::sort_key(x))));
         }
 
@@ -880,6 +903,7 @@ where
     next_item: Option<T>,
     decoder: lz4::Decoder<BufReader<ReadAdapter<'a>>>,
     items_remaining: usize,
+    binconfig: &'a bincode::Config,
     phantom_s: PhantomData<S>,
 }
 
@@ -897,13 +921,15 @@ where
         let buf_reader = BufReader::new(adp_reader);
         let mut lz4_reader = lz4::Decoder::new(buf_reader)?;
 
-        let first_item: T = deserialize_from(&mut lz4_reader)?;
+        let binconfig = &reader.binconfig;
+        let first_item: T = binconfig.deserialize_from(&mut lz4_reader)?;
         let items_remaining = rec.len_items - 1;
 
         Ok(ShardIter {
             next_item: Some(first_item),
             decoder: lz4_reader,
             items_remaining,
+            binconfig,
             phantom_s: PhantomData,
         })
     }
@@ -917,7 +943,7 @@ where
         if self.items_remaining == 0 {
             Ok((item, None))
         } else {
-            self.next_item = Some(deserialize_from(&mut self.decoder)?);
+            self.next_item = Some(self.binconfig.deserialize_from(&mut self.decoder)?);
             self.items_remaining -= 1;
             Ok((item, Some(self)))
         }
