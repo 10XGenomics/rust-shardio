@@ -28,13 +28,13 @@ failure_derive = "0.1"
 min-max-heap = "1.2.2"
 
 [dev-dependencies]
-tempfile = "3.0"
+tempfile = "^3.1"
 criterion = "0.2.3"
 fxhash = "0.2.1"
 lazy_static = "1.2"
 pretty_assertions = "0.5.1"
-quickcheck = "0.8.5"
-rand = "0.6.5"
+quickcheck = "^0.9"
+rand = "^0.7"
 is_sorted = "0.1"
 
 [[bench]]
