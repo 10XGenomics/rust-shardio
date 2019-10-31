@@ -84,6 +84,7 @@ use lz4;
 extern crate serde_derive;
 use serde::{Serialize, de::DeserializeOwned};
 
+use std::any::type_name;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -628,7 +629,7 @@ where
     fn write_index_block(&mut self) -> Result<(), Error> {
         let mut buf = Vec::new();
 
-        serialize_into(&mut buf, &self.writer.regions)?;
+        serialize_into(&mut buf, &(type_name::<T>(), type_name::<S>(), &self.writer.regions))?;
 
         let index_block_position = self.writer.cursor;
         let index_block_size = buf.len();
@@ -765,8 +766,14 @@ where
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position as u64))?;
-
-        Ok(deserialize_from(file)?)
+        let (t_typ, s_typ, recs): (String, String, Vec<ShardRecord<<S as SortKey<T>>::Key>>) = deserialize_from(file)?;
+        if t_typ != type_name::<T>() {
+            return Err(format_err!("expected shardio type {}, got {}", type_name::<T>(), t_typ));
+        }
+        if s_typ != type_name::<S>() {
+            return Err(format_err!("expected shardio sort {}, got {}", type_name::<S>(), s_typ));
+        }
+        Ok(recs)
     }
 
     fn get_decoder(buffer: &mut Vec<u8>) -> lz4::Decoder<&[u8]> {
