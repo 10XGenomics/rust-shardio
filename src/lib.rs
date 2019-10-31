@@ -71,6 +71,7 @@
 //!     let mut all_items_sorted = all_items.clone();
 //!     all_items.sort();
 //!     assert_eq!(all_items, all_items_sorted);
+//!     std::fs::remove_file(filename)?;
 //!     Ok(())
 //! }
 //! ```
