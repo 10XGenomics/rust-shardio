@@ -80,9 +80,9 @@
 use crossbeam_channel;
 use lz4;
 
-#[macro_use] 
+#[macro_use]
 extern crate serde_derive;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 
 use std::any::type_name;
 use std::borrow::Cow;
@@ -99,14 +99,12 @@ use std::marker::PhantomData;
 use std::thread;
 use std::thread::JoinHandle;
 
-
 use bincode::{deserialize_from, serialize_into};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use libc::{c_void, off_t, pread, pwrite, size_t, ssize_t};
 
 use failure::{format_err, Error};
-
 
 /// Represent a range of key space
 pub mod range;
@@ -278,7 +276,6 @@ impl<K: Ord + Serialize> FileManager<K> {
 /// }
 /// ```
 pub trait SortKey<T> {
-
     /// The type of the key that will be sorted.
     type Key: Ord + Clone;
 
@@ -629,7 +626,10 @@ where
     fn write_index_block(&mut self) -> Result<(), Error> {
         let mut buf = Vec::new();
 
-        serialize_into(&mut buf, &(type_name::<T>(), type_name::<S>(), &self.writer.regions))?;
+        serialize_into(
+            &mut buf,
+            &(type_name::<T>(), type_name::<S>(), &self.writer.regions),
+        )?;
 
         let index_block_position = self.writer.cursor;
         let index_block_size = buf.len();
@@ -766,12 +766,21 @@ where
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position as u64))?;
-        let (t_typ, s_typ, recs): (String, String, Vec<ShardRecord<<S as SortKey<T>>::Key>>) = deserialize_from(file)?;
+        let (t_typ, s_typ, recs): (String, String, Vec<ShardRecord<<S as SortKey<T>>::Key>>) =
+            deserialize_from(file)?;
         if t_typ != type_name::<T>() {
-            return Err(format_err!("expected shardio type {}, got {}", type_name::<T>(), t_typ));
+            return Err(format_err!(
+                "expected shardio type {}, got {}",
+                type_name::<T>(),
+                t_typ
+            ));
         }
         if s_typ != type_name::<S>() {
-            return Err(format_err!("expected shardio sort {}, got {}", type_name::<S>(), s_typ));
+            return Err(format_err!(
+                "expected shardio sort {}, got {}",
+                type_name::<S>(),
+                s_typ
+            ));
         }
         Ok(recs)
     }
@@ -1328,16 +1337,16 @@ where
 #[cfg(test)]
 mod shard_tests {
     use super::*;
+    use is_sorted::IsSorted;
+    use pretty_assertions::assert_eq;
+    use quickcheck::{Arbitrary, Gen, QuickCheck, StdThreadGen};
+    use rand::Rng;
     use std::collections::HashSet;
     use std::fmt::Debug;
     use std::hash::Hash;
     use std::iter::{repeat, FromIterator};
     use std::u8;
     use tempfile;
-    use pretty_assertions::assert_eq;
-    use quickcheck::{QuickCheck, Arbitrary, Gen, StdThreadGen};
-    use rand::Rng;
-    use is_sorted::IsSorted;
 
     #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord, Hash)]
     struct T1 {
@@ -1349,8 +1358,8 @@ mod shard_tests {
 
     impl Arbitrary for T1 {
         fn arbitrary<G: Gen>(g: &mut G) -> T1 {
-            T1 { 
-                a: g.gen(), 
+            T1 {
+                a: g.gen(),
                 b: g.gen(),
                 c: g.gen(),
                 d: g.gen(),
@@ -1520,7 +1529,7 @@ mod shard_tests {
 
             let mut data = Vec::new();
 
-            for _ in 0 .. slices {
+            for _ in 0..slices {
                 let slice = Vec::<T>::arbitrary(g);
                 data.push(slice);
             }
@@ -1529,26 +1538,29 @@ mod shard_tests {
         }
     }
 
-
-    fn test_multi_slice<T, S>(items: MultiSlice<T>, disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize) -> Result<Vec<T>, Error> 
+    fn test_multi_slice<T, S>(
+        items: MultiSlice<T>,
+        disk_chunk_size: usize,
+        producer_chunk_size: usize,
+        buffer_size: usize,
+    ) -> Result<Vec<T>, Error>
     where
         T: 'static + Serialize + DeserializeOwned + Clone + Send,
         S: SortKey<T>,
         <S as SortKey<T>>::Key: 'static + Send + Serialize + DeserializeOwned,
     {
-
         let mut files = Vec::new();
 
         for item_chunk in &items.0 {
             let tmp = tempfile::NamedTempFile::new()?;
 
             let writer: ShardWriter<T, S> = ShardWriter::new(
-                                    tmp.path(),
-                                    producer_chunk_size,
-                                    disk_chunk_size,
-                                    buffer_size)?;
-        
-        
+                tmp.path(),
+                producer_chunk_size,
+                disk_chunk_size,
+                buffer_size,
+            )?;
+
             let mut sender = writer.get_sender();
             for item in item_chunk {
                 sender.send(item.clone())?;
@@ -1557,7 +1569,7 @@ mod shard_tests {
             files.push(tmp);
         }
 
-        let reader = ShardReader::<T,S>::open_set(&files)?;
+        let reader = ShardReader::<T, S>::open_set(&files)?;
         let mut out_items = Vec::new();
 
         for r in reader.iter()? {
@@ -1567,27 +1579,29 @@ mod shard_tests {
         Ok(out_items)
     }
 
-
     #[test]
     fn multi_slice_correctness_quickcheck() {
-
         fn check_t1(v: MultiSlice<T1>) -> bool {
-            let sorted = test_multi_slice::<T1, FieldDSort>(v.clone(), 1024, 1<<17, 16).unwrap();
+            let sorted = test_multi_slice::<T1, FieldDSort>(v.clone(), 1024, 1 << 17, 16).unwrap();
 
             let mut vall = Vec::new();
             for chunk in v.0 {
                 vall.extend(chunk);
             }
 
-            if sorted.len() != vall.len() { return false; }
-            if !set_compare(&sorted, &vall) { return false; }
+            if sorted.len() != vall.len() {
+                return false;
+            }
+            if !set_compare(&sorted, &vall) {
+                return false;
+            }
             IsSorted::is_sorted_by_key(&mut sorted.iter(), |x| FieldDSort::sort_key(x).into_owned())
         }
 
-
-        QuickCheck::with_gen(StdThreadGen::new(500000)).tests(4).quickcheck(check_t1 as fn(MultiSlice<T1>) -> bool);
+        QuickCheck::with_gen(StdThreadGen::new(500000))
+            .tests(4)
+            .quickcheck(check_t1 as fn(MultiSlice<T1>) -> bool);
     }
-    
 
     fn check_round_trip(
         disk_chunk_size: usize,
