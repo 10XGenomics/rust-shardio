@@ -631,15 +631,8 @@ where
     fn write_index_block(&mut self) -> Result<(), Error> {
         let mut buf = Vec::new();
 
-        serialize_into(
-            &mut buf,
-            &(
-                version(),
-                type_name::<T>(),
-                type_name::<S>(),
-                &self.writer.regions,
-            ),
-        )?;
+        serialize_into(&mut buf, &(version(), type_name::<T>(), type_name::<S>()))?;
+        serialize_into(&mut buf, &self.writer.regions)?;
 
         let index_block_position = self.writer.cursor;
         let index_block_size = buf.len();
@@ -756,13 +749,13 @@ where
 {
     /// Open a shard file that stores `T` items.
     fn open<P: AsRef<Path>>(path: P) -> Result<ShardReaderSingle<T, S>, Error> {
-        let mut f = File::open(path).unwrap();
+        let f = File::open(path).unwrap();
 
         let mut binconfig = bincode::config();
         // limit ourselves to decoding no more than 268MB at a time
         binconfig.limit(1 << 28);
 
-        let mut index = Self::read_index_block(&mut f, &binconfig)?;
+        let (mut index, f) = Self::read_index_block(f, &binconfig)?;
         index.sort();
 
         Ok(ShardReaderSingle {
@@ -775,16 +768,16 @@ where
 
     /// Read shard index
     fn read_index_block(
-        file: &mut File,
+        mut file: File,
         binconfig: &bincode::Config,
-    ) -> Result<Vec<ShardRecord<<S as SortKey<T>>::Key>>, Error> {
+    ) -> Result<(Vec<ShardRecord<<S as SortKey<T>>::Key>>, File), Error> {
         let _ = file.seek(SeekFrom::End(-24))?;
         let _num_shards = file.read_u64::<BigEndian>()? as usize;
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position as u64))?;
-        let (ver, t_typ, s_typ, recs): (Version, String, String, _) =
-            binconfig.deserialize_from(file)?;
+        let (ver, t_typ, s_typ): (Version, String, String) =
+            binconfig.deserialize_from(&mut file)?;
         if ver != version() {
             warn!(
                 "expected compiler version {}, got {}; types may be incompatible",
@@ -803,7 +796,8 @@ where
                 ));
             }
         }
-        Ok(recs)
+        let recs = binconfig.deserialize_from(&mut file)?;
+        Ok((recs, file))
     }
 
     fn get_decoder(buffer: &mut Vec<u8>) -> lz4::Decoder<&[u8]> {
