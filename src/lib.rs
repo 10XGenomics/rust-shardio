@@ -1865,6 +1865,96 @@ mod shard_tests {
         }
 
         assert!(got_err);
+        tmp.close()?;
+
+        Ok(())
+    }
+
+    #[derive(Copy, Clone, Serialize, Deserialize, Debug)]
+    struct T2(u16);
+
+    #[derive(Copy, Clone, Serialize, Deserialize, Debug)]
+    struct T3(u16);
+
+    struct S2 {}
+    struct S3 {}
+
+    impl SortKey<T2> for S2 {
+        type Key = u16;
+        fn sort_key(v: &T2) -> Cow<u16> {
+            Cow::Owned(v.0)
+        }
+    }
+
+    impl SortKey<T3> for S2 {
+        type Key = u16;
+        fn sort_key(v: &T3) -> Cow<u16> {
+            Cow::Owned(v.0)
+        }
+    }
+
+    impl SortKey<T2> for S3 {
+        type Key = u16;
+        fn sort_key(v: &T2) -> Cow<u16> {
+            Cow::Owned(v.0)
+        }
+    }
+
+    #[test]
+    fn test_ttyp_error() -> Result<(), Error> {
+        let disk_chunk_size = 1 << 20;
+        let producer_chunk_size = 1 << 4;
+        let buffer_size = 1 << 16;
+
+        let tmp = tempfile::NamedTempFile::new()?;
+
+        {
+            let manager: ShardWriter<T2, S2> = ShardWriter::new(
+                tmp.path(),
+                producer_chunk_size,
+                disk_chunk_size,
+                buffer_size,
+            )?;
+            let mut sender = manager.get_sender();
+            sender.send(T2(0))?;
+        }
+        {
+            let reader = ShardReader::<T3, S2>::open(tmp.path());
+            assert!(reader.is_err());
+            if let Err(err) = reader {
+                println!("{}", err);
+            }
+        }
+        tmp.close()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_styp_error() -> Result<(), Error> {
+        let disk_chunk_size = 1 << 20;
+        let producer_chunk_size = 1 << 4;
+        let buffer_size = 1 << 16;
+
+        let tmp = tempfile::NamedTempFile::new()?;
+
+        {
+            let manager: ShardWriter<T2, S2> = ShardWriter::new(
+                tmp.path(),
+                producer_chunk_size,
+                disk_chunk_size,
+                buffer_size,
+            )?;
+            let mut sender = manager.get_sender();
+            sender.send(T2(0))?;
+        }
+        {
+            let reader = ShardReader::<T2, S3>::open(tmp.path());
+            assert!(reader.is_err());
+            if let Err(err) = reader {
+                println!("{}", err);
+            }
+        }
+        tmp.close()?;
         Ok(())
     }
 }
