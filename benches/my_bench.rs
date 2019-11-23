@@ -1,18 +1,9 @@
-#[macro_use]
-extern crate serde_derive;
-
-#[macro_use]
-extern crate criterion;
 use bincode;
-
+use criterion;
 use fxhash;
 use lz4;
-
+use nix;
 use tempfile;
-
-use criterion::Criterion;
-use failure::Error;
-use shardio::*;
 
 use std::fs::File;
 use std::hash::Hasher;
@@ -20,12 +11,20 @@ use std::io::BufWriter;
 use std::io::Write;
 use std::time::Duration;
 
+use criterion::Criterion;
+use failure::Error;
+use serde::{Deserialize, Serialize};
+use shardio::*;
+
 #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord)]
 struct T1 {
     a: u64,
     b: u32,
     c: u16,
     d: u8,
+    e: u64,
+    f: u128,
+    g: u128,
 }
 
 #[macro_use]
@@ -51,6 +50,9 @@ lazy_static! {
                 b: i as u32,
                 c: (i * 2) as u16,
                 d: i as u8,
+                e: (i as u64) * 100,
+                f: (i as u128) * 123 + 100,
+                g: (i as u128) * 100123 + 123123412,
             };
             buf.push(tt);
         }
@@ -75,7 +77,7 @@ fn main() {
                 disk_chunk_size,
                 buffer_size,
             )?;
-            let mut true_items = Vec::new();
+            let mut true_items = Vec::with_capacity(n_items);
 
             // Sender must be closed
             {
@@ -87,22 +89,27 @@ fn main() {
                         b: i as u32,
                         c: (i * 2) as u16,
                         d: i as u8,
+                        e: (i as u64) * 100,
+                        f: (i as u128) * 123 + 100,
+                        g: (i as u128) * 100123 + 123123412,
                     };
                     sender.send(tt);
                     true_items.push(tt);
                 }
             }
-            true_items.sort();
+            //true_items.sort();
             true_items
         };
 
         // Open finished file
         let reader = ShardReader::<T1>::open(tmp.path())?;
 
-        let mut all_items = Vec::new();
-        reader.read_range(&Range::all(), &mut all_items);
+        let mut all_items: Vec<T1> = vec![];
+        for r in reader.iter()? {
+            all_items.push(r?);
+        }
 
-        if !(true_items == all_items) {
+        if !(true_items.len() == all_items.len()) {
             println!("true len: {:?}", true_items.len());
             println!("round trip len: {:?}", all_items.len());
             assert!(false);
@@ -112,7 +119,7 @@ fn main() {
     }
 
     fn test_shard_round_trip_big() {
-        check_round_trip(256, 32, 1 << 12, 1 << 14);
+        check_round_trip(2048, 32, 1 << 13, 1 << 18);
     }
 
     fn benchmark_roundtrip(c: &mut Criterion) {
@@ -168,10 +175,13 @@ fn main() {
 
     let mut crit = Criterion::default()
         .warm_up_time(Duration::from_secs(1))
-        .measurement_time(Duration::from_secs(2))
-        .sample_size(20)
-        .noise_threshold(0.15);
+        .measurement_time(Duration::from_secs(15))
+        .sample_size(10)
+        .noise_threshold(0.1);
 
+    crit.bench_function("round-trip", |b| b.iter(|| test_shard_round_trip_big()));
+
+    /*
     crit.bench_function_over_inputs(
         "direct",
         |b, &&size| {
@@ -207,6 +217,7 @@ fn main() {
         },
         &v,
     );
+    */
     //criterion_group!(benches, criterion_benchmark);
     //criterion_main!(benches);
 }

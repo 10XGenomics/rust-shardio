@@ -5,11 +5,7 @@
 //! also procss disjoint subsets of sorted data.
 //!
 //! ```rust
-//! #[macro_use]
-//! extern crate serde_derive;
-//!
-//! extern crate shardio;
-//! extern crate failure;
+//! use serde::{Deserialize, Serialize};
 //! use shardio::*;
 //! use std::fs::File;
 //! use failure::Error;
@@ -75,20 +71,19 @@
 //! }
 //! ```
 
+#![deny(warnings)]
 #![deny(missing_docs)]
 
 use crossbeam_channel;
 use lz4;
 
-#[macro_use] 
-extern crate serde_derive;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::fs::FileExt;
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::path::Path;
@@ -98,14 +93,10 @@ use std::marker::PhantomData;
 use std::thread;
 use std::thread::JoinHandle;
 
-
 use bincode::{deserialize_from, serialize_into};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
-use libc::{c_void, off_t, pread, pwrite, size_t, ssize_t};
-
 use failure::{format_err, Error};
-
 
 /// Represent a range of key space
 pub mod range;
@@ -115,78 +106,6 @@ pub mod helper;
 
 pub use crate::range::Range;
 use range::Rorder;
-
-fn catch_err(e: ssize_t) -> io::Result<usize> {
-    if e == -1 as ssize_t {
-        Err(io::Error::last_os_error())
-    } else if e < 0 as ssize_t {
-        Err(io::Error::from(io::ErrorKind::InvalidData))
-    } else {
-        Ok(e as usize)
-    }
-}
-
-fn read_at(fd: &RawFd, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
-    let mut total = 0usize;
-
-    while total < buf.len() {
-        let bytes = catch_err(unsafe {
-            pread(
-                *fd,
-                buf.as_mut_ptr().offset(total as isize) as *mut c_void,
-                (buf.len() - total) as size_t,
-                (pos + total as u64) as off_t,
-            )
-        })?;
-
-        if bytes == 0 {
-            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
-        }
-
-        total += bytes;
-    }
-
-    Ok(total)
-}
-
-// Some helper code for injecting IO errors. Use for testing error handling
-//use std::cell::RefCell;
-//thread_local! {
-//    pub static WRITES: RefCell<u32> = RefCell::new(1);
-//}
-
-fn write_at(fd: &RawFd, pos: u64, buf: &[u8]) -> io::Result<usize> {
-    let mut total = 0usize;
-
-    while total < buf.len() {
-        // Helper code for injecting IO errors. Use for testing error handling.
-        //WRITES.with(|f| {
-        //    *f.borrow_mut() += 1;
-        //});
-
-        //let w = WRITES.with(|f| *f.borrow());
-        //if w == 100 {
-        //    return Err(io::Error::from(io::ErrorKind::NotConnected));
-        //}
-
-        let bytes = catch_err(unsafe {
-            pwrite(
-                *fd,
-                buf.as_ptr().offset(total as isize) as *const c_void,
-                (buf.len() - total) as size_t,
-                (pos + total as u64) as off_t,
-            )
-        })?;
-
-        if bytes == 0 {
-            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
-        }
-
-        total += bytes;
-    }
-
-    Ok(total)
-}
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// A group of `len_items` items, from shard `shard`, stored at position `offset`, using `block_size` bytes on-disk,
@@ -241,7 +160,7 @@ impl<K: Ord + Serialize> FileManager<K> {
 
         self.regions.push(reg);
         self.cursor += data.len();
-        let l = write_at(&self.file.as_raw_fd(), cur_offset as u64, data)?;
+        let l = self.file.write_at(data, cur_offset as u64)?;
 
         Ok(l)
     }
@@ -277,7 +196,6 @@ impl<K: Ord + Serialize> FileManager<K> {
 /// }
 /// ```
 pub trait SortKey<T> {
-
     /// The type of the key that will be sorted.
     type Key: Ord + Clone;
 
@@ -614,7 +532,10 @@ where
 
         {
             use std::io::Write;
-            let mut encoder = lz4::EncoderBuilder::new().build(&mut self.compress_buffer)?;
+            let mut encoder = lz4::EncoderBuilder::new()
+                .level(6) // this appears to be a good general trad-off of speed and compression ratio.
+                .build(&mut self.compress_buffer)?;
+
             encoder.write(&self.serialize_buffer)?;
             let (_, result) = encoder.finish();
             result?;
@@ -633,11 +554,9 @@ where
         let index_block_position = self.writer.cursor;
         let index_block_size = buf.len();
 
-        write_at(
-            &self.writer.file.as_raw_fd(),
-            index_block_position as u64,
-            buf.as_slice(),
-        )?;
+        self.writer
+            .file
+            .write_at(buf.as_slice(), index_block_position as u64)?;
 
         self.writer.file.seek(SeekFrom::Start(
             (index_block_position + index_block_size) as u64,
@@ -769,40 +688,6 @@ where
         Ok(deserialize_from(file)?)
     }
 
-    fn get_decoder(buffer: &mut Vec<u8>) -> lz4::Decoder<&[u8]> {
-        lz4::Decoder::new(buffer.as_slice()).unwrap()
-    }
-
-    /// Read values in with the given `range` of keys into `data`, using temporary buffer `buf` to read the compressed data into.
-    pub fn read_range(
-        &self,
-        range: &Range<<S as SortKey<T>>::Key>,
-        data: &mut Vec<T>,
-        buf: &mut Vec<u8>,
-    ) -> Result<(), Error> {
-        for rec in self
-            .index
-            .iter()
-            .cloned()
-            .filter(|x| range.intersects_shard(x))
-        {
-            buf.resize(rec.len_bytes, 0);
-            let read_len = read_at(
-                &self.file.as_raw_fd(),
-                rec.offset as u64,
-                buf.as_mut_slice(),
-            )?;
-            assert_eq!(read_len, rec.len_bytes);
-
-            let mut decoder = Self::get_decoder(buf);
-            let r: Vec<T> = deserialize_from(&mut decoder)?;
-            data.extend(r.into_iter().filter(|x| range.contains(&S::sort_key(x))));
-        }
-
-        data.sort_by(|x, y| S::sort_key(x).cmp(&S::sort_key(y)));
-        Ok(())
-    }
-
     /// Return an iterator over the items in the given `range` of keys.
     pub fn iter_range(
         &self,
@@ -848,7 +733,7 @@ impl<'a> Read for ReadAdapter<'a> {
         let read_len = std::cmp::min(buf.len(), self.bytes_remaining);
 
         let buf_slice = &mut buf[0..read_len];
-        let actual_read = read_at(&self.file.as_raw_fd(), self.offset as u64, buf_slice)?;
+        let actual_read = self.file.read_at(buf_slice, self.offset as u64)?;
         self.offset += actual_read;
         self.bytes_remaining -= actual_read;
 
@@ -1225,15 +1110,15 @@ where
         Ok(ShardReader { readers })
     }
 
-    /// Read data from the given `range` into `data` buffer. The `data` buffer is not cleared before adding items.
+    /// Read data from the given `range` into `data` buffer. The `data` buffer is cleared before adding items.
     pub fn read_range(
         &self,
         range: &Range<<S as SortKey<T>>::Key>,
         data: &mut Vec<T>,
     ) -> Result<(), Error> {
-        let mut buf = Vec::new();
-        for r in &self.readers {
-            r.read_range(range, data, &mut buf)?;
+        data.clear();
+        for item in self.iter_range(range)? {
+            data.push(item?);
         }
         Ok(())
     }
@@ -1321,16 +1206,16 @@ where
 #[cfg(test)]
 mod shard_tests {
     use super::*;
+    use is_sorted::IsSorted;
+    use pretty_assertions::assert_eq;
+    use quickcheck::{Arbitrary, Gen, QuickCheck, StdThreadGen};
+    use rand::Rng;
     use std::collections::HashSet;
     use std::fmt::Debug;
     use std::hash::Hash;
     use std::iter::{repeat, FromIterator};
     use std::u8;
     use tempfile;
-    use pretty_assertions::assert_eq;
-    use quickcheck::{QuickCheck, Arbitrary, Gen, StdThreadGen};
-    use rand::Rng;
-    use is_sorted::IsSorted;
 
     #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord, Hash)]
     struct T1 {
@@ -1342,8 +1227,8 @@ mod shard_tests {
 
     impl Arbitrary for T1 {
         fn arbitrary<G: Gen>(g: &mut G) -> T1 {
-            T1 { 
-                a: g.gen(), 
+            T1 {
+                a: g.gen(),
                 b: g.gen(),
                 c: g.gen(),
                 d: g.gen(),
@@ -1388,14 +1273,14 @@ mod shard_tests {
             buf.push((i % 254) as u8);
         }
 
-        let written = write_at(&tmp.as_raw_fd(), 0, &buf).unwrap();
+        let written = tmp.write_at(&buf, 0).unwrap();
         assert_eq!(n, written);
 
         for i in 0..n {
             buf[i] = 0;
         }
 
-        let read = read_at(&tmp.as_raw_fd(), 0, &mut buf).unwrap();
+        let read = tmp.read_at(&mut buf, 0).unwrap();
         assert_eq!(n, read);
 
         for i in 0..n {
@@ -1513,7 +1398,7 @@ mod shard_tests {
 
             let mut data = Vec::new();
 
-            for _ in 0 .. slices {
+            for _ in 0..slices {
                 let slice = Vec::<T>::arbitrary(g);
                 data.push(slice);
             }
@@ -1522,26 +1407,29 @@ mod shard_tests {
         }
     }
 
-
-    fn test_multi_slice<T, S>(items: MultiSlice<T>, disk_chunk_size: usize, producer_chunk_size: usize, buffer_size: usize) -> Result<Vec<T>, Error> 
+    fn test_multi_slice<T, S>(
+        items: MultiSlice<T>,
+        disk_chunk_size: usize,
+        producer_chunk_size: usize,
+        buffer_size: usize,
+    ) -> Result<Vec<T>, Error>
     where
         T: 'static + Serialize + DeserializeOwned + Clone + Send,
         S: SortKey<T>,
         <S as SortKey<T>>::Key: 'static + Send + Serialize + DeserializeOwned,
     {
-
         let mut files = Vec::new();
 
         for item_chunk in &items.0 {
             let tmp = tempfile::NamedTempFile::new()?;
 
             let writer: ShardWriter<T, S> = ShardWriter::new(
-                                    tmp.path(),
-                                    producer_chunk_size,
-                                    disk_chunk_size,
-                                    buffer_size)?;
-        
-        
+                tmp.path(),
+                producer_chunk_size,
+                disk_chunk_size,
+                buffer_size,
+            )?;
+
             let mut sender = writer.get_sender();
             for item in item_chunk {
                 sender.send(item.clone())?;
@@ -1550,7 +1438,7 @@ mod shard_tests {
             files.push(tmp);
         }
 
-        let reader = ShardReader::<T,S>::open_set(&files)?;
+        let reader = ShardReader::<T, S>::open_set(&files)?;
         let mut out_items = Vec::new();
 
         for r in reader.iter()? {
@@ -1560,27 +1448,29 @@ mod shard_tests {
         Ok(out_items)
     }
 
-
     #[test]
     fn multi_slice_correctness_quickcheck() {
-
         fn check_t1(v: MultiSlice<T1>) -> bool {
-            let sorted = test_multi_slice::<T1, FieldDSort>(v.clone(), 1024, 1<<17, 16).unwrap();
+            let sorted = test_multi_slice::<T1, FieldDSort>(v.clone(), 1024, 1 << 17, 16).unwrap();
 
             let mut vall = Vec::new();
             for chunk in v.0 {
                 vall.extend(chunk);
             }
 
-            if sorted.len() != vall.len() { return false; }
-            if !set_compare(&sorted, &vall) { return false; }
+            if sorted.len() != vall.len() {
+                return false;
+            }
+            if !set_compare(&sorted, &vall) {
+                return false;
+            }
             IsSorted::is_sorted_by_key(&mut sorted.iter(), |x| FieldDSort::sort_key(x).into_owned())
         }
 
-
-        QuickCheck::with_gen(StdThreadGen::new(500000)).tests(4).quickcheck(check_t1 as fn(MultiSlice<T1>) -> bool);
+        QuickCheck::with_gen(StdThreadGen::new(500000))
+            .tests(4)
+            .quickcheck(check_t1 as fn(MultiSlice<T1>) -> bool);
     }
-    
 
     fn check_round_trip(
         disk_chunk_size: usize,
@@ -1650,18 +1540,27 @@ mod shard_tests {
                 assert_eq!(&true_items, &all_items);
             }
 
-            for rc in [1, 3, 8, 15].iter() {
+            for rc in [1, 3, 8, 15, 27].iter() {
                 // Open finished file & test chunked reads
                 let set_reader = ShardReader::<T1>::open(&tmp.path())?;
                 let mut all_items_chunks = Vec::new();
 
                 // Read in chunks
                 let chunks = set_reader.make_chunks(*rc, &Range::all());
+                assert!(
+                    chunks.len() <= *rc,
+                    "chunks > req: ({} > {})",
+                    chunks.len(),
+                    *rc
+                );
+
                 for c in chunks {
                     let itr = set_reader.iter_range(&c)?;
 
                     for i in itr {
-                        all_items_chunks.push(i?);
+                        let i = i?;
+                        assert!(c.contains(&i));
+                        all_items_chunks.push(i);
                     }
                 }
                 assert_eq!(&true_items, &all_items_chunks);
@@ -1738,9 +1637,16 @@ mod shard_tests {
                 );
                 for c in chunks {
                     let itr = set_reader.iter_range(&c)?;
-                    all_items_chunks.extend(itr);
+
+                    for i in itr {
+                        let i = i?;
+                        let key = FieldDSort::sort_key(&i);
+                        assert!(c.contains(&key));
+                        all_items_chunks.push(i);
+                    }
                 }
-                //set_compare(&true_items, &all_items_chunks);
+
+                set_compare(&true_items, &all_items_chunks);
             }
         }
 
