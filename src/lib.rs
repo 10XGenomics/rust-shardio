@@ -1158,6 +1158,9 @@ where
 
         // Enumerate all the in-range known start locations in the dataset
         let mut starts = BTreeSet::new();
+        //if let Some(s) = &range.start {
+        //    starts.insert(s.clone());
+        //}
         for r in &self.readers {
             for block in &r.index {
                 if range.contains(&block.start_key) {
@@ -1244,16 +1247,11 @@ mod shard_tests {
         }
     }
 
-    fn rand_items(n: usize) -> Vec<T1> {
+    fn rand_items(n: usize, g: &mut impl Gen) -> Vec<T1> {
         let mut items = Vec::new();
 
-        for i in 0..n {
-            let tt = T1 {
-                a: (((i / 2) + (i * 10)) % 3 + (i * 5) % 2) as u64,
-                b: i as u32,
-                c: (i * 2) as u16,
-                d: ((i % 5) * 10 + (if i % 10 > 7 { i / 10 } else { 0 })) as u8,
-            };
+        for _ in 0..n {
+            let tt = T1::arbitrary(g);
             items.push(tt);
         }
 
@@ -1337,11 +1335,12 @@ mod shard_tests {
     fn test_shard_one_key() -> Result<(), Error> {
         let n_items = 1 << 16;
         let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut g = StdThreadGen::new(10);
 
         // Write and close file
         let true_items = {
             let manager: ShardWriter<T1> = ShardWriter::new(tmp.path(), 16, 64, 1 << 10).unwrap();
-            let true_items = repeat(rand_items(1)[0]).take(n_items).collect::<Vec<_>>();
+            let true_items = repeat(rand_items(1, &mut g)[0]).take(n_items).collect::<Vec<_>>();
 
             // Sender must be closed
             {
@@ -1501,6 +1500,7 @@ mod shard_tests {
         );
 
         let tmp = tempfile::NamedTempFile::new()?;
+        let mut g = StdThreadGen::new(10);
 
         // Write and close file
         let true_items = {
@@ -1510,7 +1510,7 @@ mod shard_tests {
                 disk_chunk_size,
                 buffer_size,
             )?;
-            let mut true_items = rand_items(n_items);
+            let mut true_items = rand_items(n_items, &mut g);
 
             // Sender must be closed
             {
@@ -1540,33 +1540,64 @@ mod shard_tests {
                 assert_eq!(&true_items, &all_items);
             }
 
-            for rc in [1, 3, 8, 15, 27].iter() {
-                // Open finished file & test chunked reads
-                let set_reader = ShardReader::<T1>::open(&tmp.path())?;
-                let mut all_items_chunks = Vec::new();
+            for rc in [1, 3, 8, 100, 1000].iter() {
+                for _ in 0..5 {
+                    // Open finished file & test chunked reads
+                    let set_reader = ShardReader::<T1>::open(&tmp.path())?;
+                    
 
-                // Read in chunks
-                let chunks = set_reader.make_chunks(*rc, &Range::all());
-                assert!(
-                    chunks.len() <= *rc,
-                    "chunks > req: ({} > {})",
-                    chunks.len(),
-                    *rc
-                );
+                    // Read in chunks
+                    let range: Range<T1> = Range::arbitrary(&mut g);
+                    let chunks = set_reader.make_chunks(*rc, &range);
+                    assert!(
+                        chunks.len() <= *rc,
+                        "chunks > req: ({} > {})",
+                        chunks.len(),
+                        *rc
+                    );
+                    
+                    let mut read_items = Vec::new();
 
-                for c in chunks {
-                    let itr = set_reader.iter_range(&c)?;
+                    for c in chunks {
+                        let itr = set_reader.iter_range(&c)?;
 
-                    for i in itr {
-                        let i = i?;
-                        assert!(c.contains(&i));
-                        all_items_chunks.push(i);
+                        for i in itr {
+                            let i = i?;
+                            assert!(c.contains(&i));
+                            assert!(range.contains(&i));
+                
+                            read_items.push(i);
+                        }
                     }
+
+                    let correct_items: Vec<_> =
+                        true_items
+                        .iter()
+                        .cloned()
+                        .filter(|i| range.contains(&i))
+                        .collect();
+                
+                    assert_eq!(&correct_items, &read_items);
                 }
-                assert_eq!(&true_items, &all_items_chunks);
             }
         }
         Ok(())
+    }
+
+
+    impl<T: Arbitrary + Ord> Arbitrary for Range<T> {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            let v1 = T::arbitrary(g);
+            let v2 = T::arbitrary(g);
+
+            let low = std::cmp::min(v1.clone(), v2.clone());
+            let high = std::cmp::max(v1, v2);
+
+            let start = if bool::arbitrary(g) { Some(low) } else { None };
+            let end = if bool::arbitrary(g) { Some(high) } else { None };
+
+            Range { start, end }
+        }
     }
 
     fn check_round_trip_sort_key(
@@ -1582,6 +1613,7 @@ mod shard_tests {
         );
 
         let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut g = StdThreadGen::new(10);
 
         // Write and close file
         let true_items = {
@@ -1591,7 +1623,7 @@ mod shard_tests {
                 disk_chunk_size,
                 buffer_size,
             )?;
-            let mut true_items = rand_items(n_items);
+            let mut true_items = rand_items(n_items, &mut g);
 
             // Sender must be closed
             {
@@ -1678,6 +1710,7 @@ mod shard_tests {
         let n_items = 1 << 19;
 
         let tmp = tempfile::NamedTempFile::new()?;
+        let mut g = StdThreadGen::new(10);
 
         // Write and close file
         let _true_items = {
@@ -1687,7 +1720,7 @@ mod shard_tests {
                 disk_chunk_size,
                 buffer_size,
             )?;
-            let mut true_items = rand_items(n_items);
+            let mut true_items = rand_items(n_items, &mut g);
 
             // Sender must be closed
             {

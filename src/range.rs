@@ -97,6 +97,14 @@ impl<K: Ord + Clone> Range<K> {
         }
     }
 
+    /// Ensure that  start <= end
+    pub fn is_valid(&self) -> bool {
+        match (&self.start, &self.end) {
+            (Some(s), Some(e)) => s <= e,
+            _ => true
+        }
+    }
+
     // is inclusive `start` position s1 less than exclusive `end` position e2
     #[inline]
     fn se_lt(s1: &Option<K>, e2: &Option<K>) -> bool {
