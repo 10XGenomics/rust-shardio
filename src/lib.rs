@@ -82,6 +82,7 @@ use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
+use std::ops::DerefMut;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -259,6 +260,8 @@ where
     }
 }
 
+/// Coordinate a pair of buffers that need to added to from multiple threads and processed/flushed when full.
+/// Coordinates acces to `buffer_state`, passing full buffers to `handler` when they are full.
 struct BufferStateMachine<T, H> {
     sender_buffer_size: usize,
     buffer_state: Mutex<BufStates<T>>,
@@ -266,23 +269,34 @@ struct BufferStateMachine<T, H> {
     closed: AtomicBool,
 }
 
+/// There are always two item buffers held by a ShardWriter. A buffer can be in the process of being filled,
+/// waiting for use, or being processed & written to disk.  In the first two states, the buffer will be held
+/// by this enum.  In the processing state it will be held on the stack of the thread processing the buffer.
 #[derive(PartialEq, Eq)]
 enum BufStates<T> {
+    /// Fill the first buffer, using the second as backup
     FillAndWait(Vec<T>, Vec<T>),
+    /// Fill the buffer, the other buffer is being written out
     FillAndBusy(Vec<T>),
+    /// Both buffers are busy, try again later
     BothBusy,
+    /// Placeholder variable, should never be observed.
     Dummy,
 }
 
-use BufStates::*;
-
+/// Outcome of trying to add items to the buffer.
 enum BufAddOutcome<T> {
+    /// Items added successfully
     Done,
+    /// No free buffers, operation must be re-tried
     Retry,
+    /// Items added, but a buffer was filled and must be processed. 
+    /// Buffer to be processed is attached.
     Process(Vec<T>),
 }
 
 use BufAddOutcome::*;
+use BufStates::*;
 
 use std::fmt;
 
@@ -298,17 +312,22 @@ impl<T> fmt::Debug for BufStates<T> {
 }
 
 impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
+
+    /// Move `items` into the buffer & it. If a buffer is filled by this operation
+    /// then the calling thread will be used to process the full buffer. 
     fn add_items(&self, items: &mut Vec<T>) -> Result<(), Error> {
         if self.closed.load(std::sync::atomic::Ordering::Relaxed) {
             panic!("tried to add items to BufHandler after it was closed");
         }
 
         loop {
-            use std::ops::DerefMut;
+            
+            /// get mutex on buffers 
             let mut buffer_state = self.buffer_state.lock().unwrap();
             let mut current_state = Dummy;
             std::mem::swap(buffer_state.deref_mut(), &mut current_state);
 
+            /// determine new state and any follow-up work
             let (mut new_state, outcome) = match current_state {
                 FillAndWait(mut f, w) => {
                     f.extend(items.drain(..));
@@ -330,30 +349,33 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
                 Dummy => unreachable!(),
             };
 
-            // fill in the new state.
+            // Fill in the new state.
             std::mem::swap(buffer_state.deref_mut(), &mut new_state);
 
             // drop the mutex
             drop(buffer_state);
 
+            // outcome could be to process a full vec, retry, or be done.
             match outcome {
                 Process(mut buf_to_process) => {
                     // process the buffer & return it to the pool.
                     self.process_buffer(&mut buf_to_process)?;
                     self.return_buffer(buf_to_process);
                     break;
-                }
-                Done => break,
+                },
                 Retry => {
                     thread::yield_now();
                     continue;
-                }
+                },
+                Done => break,
             }
         }
 
         Ok(())
     }
 
+    /// shut down the buffer machinery, processing any remaining items.
+    /// calls to `add_items` after `close` will panic.
     pub fn close(self) -> Result<H, Error> {
         self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
         let mut bufs_processed = 0;
@@ -393,6 +415,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
         Ok(self.handler.into_inner().unwrap())
     }
 
+    /// put a buffer back into service after processing
     fn return_buffer(&self, buf: Vec<T>) {
         use std::ops::DerefMut;
         let mut buffer_state = self.buffer_state.lock().unwrap();
@@ -409,6 +432,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
         std::mem::swap(buffer_state.deref_mut(), &mut new_state);
     }
 
+    /// process `buf`
     pub fn process_buffer(&self, buf: &mut Vec<T>) -> Result<(), Error> {
         // prepare the buffer for process - this doesn't require
         // a lock on handler
@@ -422,6 +446,9 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
     }
 }
 
+/// Two-part handler for a buffer needing processing. 
+/// `prepare_buf` is generic and needs no state. Used for sorting.
+/// `process_buf` needs exclusive access to the handler, so can do IO.
 trait BufHandler<T> {
     fn prepare_buf(v: &mut Vec<T>);
     fn process_buf(&mut self, v: &mut Vec<T>) -> Result<(), Error>;
@@ -452,10 +479,13 @@ where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
+
+    /// Sort items according to `S`.
     fn prepare_buf(buf: &mut Vec<T>) {
         buf.sort_by(|x, y| S::sort_key(x).cmp(&S::sort_key(y)));
     }
 
+    /// Write items to disk chunks
     fn process_buf(&mut self, buf: &mut Vec<T>) -> Result<(), Error> {
         // Write out the buffer chunks
         for c in buf.chunks(self.chunk_size) {
