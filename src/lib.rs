@@ -216,6 +216,8 @@ where
         assert!(disk_chunk_size >= 1);
         assert!(item_buffer_size >= 1);
         assert!(sender_buffer_size >= 1);
+        assert!(item_buffer_size >= sender_buffer_size);
+
         let inner =
             ShardWriterInner::new(disk_chunk_size, item_buffer_size, sender_buffer_size, path)?;
 
@@ -364,6 +366,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
                     break;
                 },
                 Retry => {
+                    // take a break before trying again.
                     thread::yield_now();
                     continue;
                 },
@@ -1412,7 +1415,8 @@ mod shard_tests {
     #[test]
     fn test_shard_round_trip_sort_key() -> Result<(), Error> {
         // Test different buffering configurations
-        check_round_trip_sort_key(10, 20, 1, 256, true)?;
+        check_round_trip_sort_key(10, 10, 10, 256, true)?;
+        check_round_trip_sort_key(10, 2, 3, 512, true)?;
         check_round_trip_sort_key(10, 20, 40, 256, true)?;
         check_round_trip_sort_key(1024, 16, 2 << 14, 1 << 16, true)?;
         check_round_trip_sort_key(4096, 8, 2048, 1 << 16, true)?;
@@ -1557,7 +1561,7 @@ mod shard_tests {
     #[test]
     fn multi_slice_correctness_quickcheck() {
         fn check_t1(v: MultiSlice<T1>) -> bool {
-            let sorted = test_multi_slice::<T1, FieldDSort>(v.clone(), 1024, 1 << 17, 16).unwrap();
+            let sorted = test_multi_slice::<T1, FieldDSort>(v.clone(), 1024, 16, 1 << 17).unwrap();
 
             let mut vall = Vec::new();
             for chunk in v.0 {
