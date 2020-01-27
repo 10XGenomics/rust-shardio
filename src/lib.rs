@@ -71,8 +71,8 @@
 //! }
 //! ```
 
-///#![deny(warnings)]
-///#![deny(missing_docs)]
+#![deny(warnings)]
+#![deny(missing_docs)]
 use lz4;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -234,7 +234,13 @@ where
         if let Some(inner_arc) = self.inner.take() {
             match Arc::try_unwrap(inner_arc) {
                 Ok(inner) => inner.close(),
-                Err(_) => panic!("ShardSenders are still active. They must all be out of scope before ShardWriter is closed"),
+                Err(_) => {
+                    if !std::thread::panicking() {
+                        panic!("ShardSenders are still active. They must all be out of scope before ShardWriter is closed");
+                    } else {
+                        return Ok(0);
+                    }
+                }
             }
         } else {
             Ok(0)
@@ -1274,7 +1280,6 @@ mod shard_tests {
     use is_sorted::IsSorted;
     use pretty_assertions::assert_eq;
     use quickcheck::{Arbitrary, Gen, QuickCheck, StdThreadGen};
-    use rand::Rng;
     use std::collections::HashSet;
     use std::fmt::Debug;
     use std::hash::Hash;
@@ -1293,10 +1298,10 @@ mod shard_tests {
     impl Arbitrary for T1 {
         fn arbitrary<G: Gen>(g: &mut G) -> T1 {
             T1 {
-                a: g.gen(),
-                b: g.gen(),
-                c: g.gen(),
-                d: g.gen(),
+                a: u64::arbitrary(g),
+                b: u32::arbitrary(g),
+                c: u16::arbitrary(g),
+                d: u8::arbitrary(g),
             }
         }
     }
@@ -1309,20 +1314,21 @@ mod shard_tests {
         }
     }
 
-    fn rand_items(n: usize) -> Vec<T1> {
+    fn rand_items(n: usize, g: &mut impl Gen) -> Vec<T1> {
         let mut items = Vec::new();
-
-        for i in 0..n {
-            let tt = T1 {
-                a: (((i / 2) + (i * 10)) % 3 + (i * 5) % 2) as u64,
-                b: i as u32,
-                c: (i * 2) as u16,
-                d: ((i % 5) * 10 + (if i % 10 > 7 { i / 10 } else { 0 })) as u8,
-            };
+        for _ in 0..n {
+            let tt = T1::arbitrary(g);
             items.push(tt);
         }
-
         items
+    }
+
+    fn rand_item_chunks(n_chunks: usize, items_per_chunk: usize, g: &mut impl Gen) -> Vec<Vec<T1>> {
+        let mut chunks = Vec::new();
+        for _ in 0..n_chunks {
+            chunks.push(rand_items(items_per_chunk, g));
+        }
+        chunks
     }
 
     // Some tests are configured to only run with the "full-test" feature enabled.
@@ -1408,7 +1414,11 @@ mod shard_tests {
         // Write and close file
         let true_items = {
             let manager: ShardWriter<T1> = ShardWriter::new(tmp.path(), 16, 64, 1 << 10).unwrap();
-            let true_items = repeat(rand_items(1)[0]).take(n_items).collect::<Vec<_>>();
+
+            let mut g = StdThreadGen::new(10);
+            let true_items = repeat(rand_items(1, &mut g)[0])
+                .take(n_items)
+                .collect::<Vec<_>>();
 
             // Sender must be closed
             {
@@ -1567,22 +1577,23 @@ mod shard_tests {
         <S as SortKey<T>>::Key: Ord + Clone + Serialize + Send,
     {
         fn send_from_threads(
-            items: &[T],
+            chunks: Vec<Vec<T>>,
             sender: ShardSender<T, S>,
-            n: usize,
-        ) -> Result<(), Error> {
-            let barrier = Arc::new(std::sync::Barrier::new(n + 1));
+        ) -> Result<Vec<T>, Error> {
+            let barrier = Arc::new(std::sync::Barrier::new(chunks.len()));
             let mut handles = Vec::new();
 
-            for _chunk in items.chunks(items.len() / n) {
+            let mut all_items = Vec::new();
+
+            for chunk in chunks {
                 let mut s = sender.clone();
-                let chunk: Vec<T> = _chunk.iter().cloned().collect();
-                let barrier = barrier.clone();
+                all_items.extend(chunk.iter().cloned());
+                let b = barrier.clone();
 
                 let h = std::thread::spawn(move || -> Result<(), Error> {
-                    barrier.wait();
-                    for c in chunk {
-                        s.send(c)?;
+                    b.wait();
+                    for item in chunk {
+                        s.send(item)?;
                     }
                     Ok(())
                 });
@@ -1594,7 +1605,7 @@ mod shard_tests {
                 h.join().unwrap()?;
             }
 
-            Ok(())
+            Ok(all_items)
         }
     }
 
@@ -1620,9 +1631,10 @@ mod shard_tests {
                 disk_chunk_size,
                 buffer_size,
             )?;
-            let mut true_items = rand_items(n_items);
 
-            ThreadSender::send_from_threads(&true_items, writer.get_sender(), 4)?;
+            let mut g = StdThreadGen::new(10);
+            let send_chunks = rand_item_chunks(4, n_items / 4, &mut g);
+            let mut true_items = ThreadSender::send_from_threads(send_chunks, writer.get_sender())?;
 
             writer.finish()?;
             true_items.sort();
@@ -1695,9 +1707,10 @@ mod shard_tests {
                 disk_chunk_size,
                 buffer_size,
             )?;
-            let mut true_items = rand_items(n_items);
 
-            ThreadSender::send_from_threads(&true_items, writer.get_sender(), 4)?;
+            let mut g = StdThreadGen::new(10);
+            let send_chunks = rand_item_chunks(4, n_items / 4, &mut g);
+            let mut true_items = ThreadSender::send_from_threads(send_chunks, writer.get_sender())?;
 
             writer.finish()?;
 
@@ -1784,7 +1797,9 @@ mod shard_tests {
                 disk_chunk_size,
                 buffer_size,
             )?;
-            let mut true_items = rand_items(n_items);
+
+            let mut g = StdThreadGen::new(10);
+            let mut true_items = rand_items(n_items, &mut g);
 
             // Sender must be closed
             {
@@ -1808,16 +1823,20 @@ mod shard_tests {
         file.set_len(3 * sz / 4).unwrap();
 
         // make sure we get a read err due to the truncated file.
-        let mut got_err = false;
-        let iter = reader.iter_range(&Range::all())?;
-        for i in iter {
+        let iter = reader.iter_range(&Range::all());
+
+        // Could get the error here
+        if iter.is_err() {
+            return Ok(());
+        }
+
+        for i in iter? {
+            // or could get the error here
             if i.is_err() {
-                got_err = true;
-                break;
+                return Ok(());
             }
         }
 
-        assert!(got_err);
-        Ok(())
+        Err(format_err!("didn't shardio IO error correctly"))
     }
 }
