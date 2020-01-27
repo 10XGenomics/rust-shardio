@@ -322,12 +322,12 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
 
         loop {
             
-            /// get mutex on buffers 
+            // get mutex on buffers 
             let mut buffer_state = self.buffer_state.lock().unwrap();
             let mut current_state = Dummy;
             std::mem::swap(buffer_state.deref_mut(), &mut current_state);
 
-            /// determine new state and any follow-up work
+            // determine new state and any follow-up work
             let (mut new_state, outcome) = match current_state {
                 FillAndWait(mut f, w) => {
                     f.extend(items.drain(..));
@@ -385,7 +385,6 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
                 break;
             }
 
-            use std::ops::DerefMut;
             let mut buffer_state = self.buffer_state.lock().unwrap();
             let mut current_state = BufStates::Dummy;
             std::mem::swap(buffer_state.deref_mut(), &mut current_state);
@@ -417,7 +416,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
 
     /// put a buffer back into service after processing
     fn return_buffer(&self, buf: Vec<T>) {
-        use std::ops::DerefMut;
+
         let mut buffer_state = self.buffer_state.lock().unwrap();
         let mut current_state = BufStates::Dummy;
         std::mem::swap(buffer_state.deref_mut(), &mut current_state);
