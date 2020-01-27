@@ -73,7 +73,6 @@
 
 ///#![deny(warnings)]
 ///#![deny(missing_docs)]
-
 use lz4;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -84,8 +83,8 @@ use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::os::unix::fs::FileExt;
 
-use std::sync::Arc;
 use std::path::Path;
+use std::sync::Arc;
 
 use min_max_heap::MinMaxHeap;
 use std::marker::PhantomData;
@@ -96,8 +95,8 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use std::sync::atomic::AtomicBool;
 
-use std::sync::Mutex;
 use failure::{format_err, Error};
+use std::sync::Mutex;
 
 /// Represent a range of key space
 pub mod range;
@@ -183,7 +182,7 @@ where
 /// Items are sorted according to the `Ord` implementation of type `S::Key`. Type `S`, implementing the `SortKey` trait
 /// maps items of type `T` to their sort key of type `S::Key`. By default the sort key is the data item itself, and the
 /// the `DefaultSort` implementation of `SortKey` is the identity function.
-pub struct ShardWriter<T, S = DefaultSort> 
+pub struct ShardWriter<T, S = DefaultSort>
 where
     T: 'static + Send + Serialize,
     S: SortKey<T>,
@@ -192,7 +191,6 @@ where
     inner: Option<Arc<ShardWriterInner<T, S>>>,
     sort: PhantomData<S>,
 }
-
 
 impl<T, S> ShardWriter<T, S>
 where
@@ -214,12 +212,12 @@ where
         disk_chunk_size: usize,
         item_buffer_size: usize,
     ) -> Result<ShardWriter<T, S>, Error> {
-
         assert!(disk_chunk_size >= 1);
         assert!(item_buffer_size >= 1);
         assert!(sender_buffer_size >= 1);
-        let inner = ShardWriterInner::new(disk_chunk_size, item_buffer_size, sender_buffer_size, path)?;
-      
+        let inner =
+            ShardWriterInner::new(disk_chunk_size, item_buffer_size, sender_buffer_size, path)?;
+
         Ok(ShardWriter {
             inner: Some(Arc::new(inner)),
             sort: PhantomData,
@@ -244,9 +242,8 @@ where
     }
 }
 
-
-impl<T, S> Drop for ShardWriter<T, S> 
-where 
+impl<T, S> Drop for ShardWriter<T, S>
+where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: 'static + Send + Ord + Serialize + Clone,
     T: Send + Serialize,
@@ -255,7 +252,6 @@ where
         let _e = self.finish();
     }
 }
-
 
 struct BufferStateMachine<T, H> {
     sender_buffer_size: usize,
@@ -274,7 +270,6 @@ enum BufStates<T> {
 
 use BufStates::*;
 
-
 enum BufAddOutcome<T> {
     Done,
     Retry,
@@ -283,13 +278,12 @@ enum BufAddOutcome<T> {
 
 use BufAddOutcome::*;
 
-
 use std::fmt;
 
 impl<T> fmt::Debug for BufStates<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BufStates::FillAndWait(a,b) => write!(f, "FillAndWait({}, {})", a.len(), b.len()),
+            BufStates::FillAndWait(a, b) => write!(f, "FillAndWait({}, {})", a.len(), b.len()),
             BufStates::FillAndBusy(a) => write!(f, "FillAndBusy({})", a.len()),
             BufStates::BothBusy => write!(f, "BothBusy"),
             BufStates::Dummy => write!(f, "Dummy"),
@@ -298,9 +292,7 @@ impl<T> fmt::Debug for BufStates<T> {
 }
 
 impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
-
     fn add_items(&self, items: &mut Vec<T>) -> Result<(), Error> {
-
         if self.closed.load(std::sync::atomic::Ordering::Relaxed) {
             panic!("tried to add items to BufHandler after it was closed");
         }
@@ -319,7 +311,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
                     } else {
                         (FillAndWait(f, w), Done)
                     }
-                },
+                }
                 FillAndBusy(mut f) => {
                     f.extend(items.drain(..));
                     if f.len() + self.sender_buffer_size >= f.capacity() {
@@ -327,7 +319,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
                     } else {
                         (FillAndBusy(f), Done)
                     }
-                },
+                }
                 BothBusy => (BothBusy, Retry),
                 Dummy => unreachable!(),
             };
@@ -343,10 +335,13 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
                     // process the buffer & return it to the pool.
                     self.process_buffer(&mut buf_to_process)?;
                     self.return_buffer(buf_to_process);
-                    break
-                },
+                    break;
+                }
                 Done => break,
-                Retry => { thread::yield_now(); continue; },
+                Retry => {
+                    thread::yield_now();
+                    continue;
+                }
             }
         }
 
@@ -354,7 +349,6 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
     }
 
     pub fn close(self) -> Result<H, Error> {
-
         self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
         let mut bufs_processed = 0;
 
@@ -369,14 +363,13 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
             std::mem::swap(buffer_state.deref_mut(), &mut current_state);
 
             let (mut new_state, to_process) = match current_state {
-                BufStates::FillAndWait(f, w) => {
-                    (BufStates::FillAndBusy(w), Some(f))
-                },
-                BufStates::FillAndBusy(f) => {
-                    (BufStates::BothBusy, Some(f))
-                },
+                BufStates::FillAndWait(f, w) => (BufStates::FillAndBusy(w), Some(f)),
+                BufStates::FillAndBusy(f) => (BufStates::BothBusy, Some(f)),
                 // if both buffers are busy, we yield and try again.
-                BufStates::BothBusy => { thread::yield_now(); continue; },
+                BufStates::BothBusy => {
+                    thread::yield_now();
+                    continue;
+                }
                 BufStates::Dummy => unreachable!(),
             };
 
@@ -389,7 +382,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
             } else {
                 unreachable!();
             }
-        };
+        }
 
         Ok(self.handler.into_inner().unwrap())
     }
@@ -423,17 +416,16 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
     }
 }
 
-
 trait BufHandler<T> {
     fn prepare_buf(v: &mut Vec<T>);
     fn process_buf(&mut self, v: &mut Vec<T>) -> Result<(), Error>;
 }
 
-struct SortAndWriteHandler<T,S>
+struct SortAndWriteHandler<T, S>
 where
     T: Send + Serialize,
     S: SortKey<T>,
-    <S as SortKey<T>>::Key: Ord + Clone + Serialize, 
+    <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
     // Current start position of next chunk
     cursor: usize,
@@ -448,11 +440,11 @@ where
     compress_buffer: Vec<u8>,
 }
 
-impl<T,S> BufHandler<T> for SortAndWriteHandler<T, S>
+impl<T, S> BufHandler<T> for SortAndWriteHandler<T, S>
 where
     T: Send + Serialize,
     S: SortKey<T>,
-    <S as SortKey<T>>::Key: Ord + Clone + Serialize, 
+    <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
     fn prepare_buf(buf: &mut Vec<T>) {
         buf.sort_by(|x, y| S::sort_key(x).cmp(&S::sort_key(y)));
@@ -468,15 +460,16 @@ where
     }
 }
 
-impl<T,S> SortAndWriteHandler<T, S>
+impl<T, S> SortAndWriteHandler<T, S>
 where
     T: Send + Serialize,
     S: SortKey<T>,
-    <S as SortKey<T>>::Key: Ord + Clone + Serialize, 
+    <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
-
-    pub fn new<P: AsRef<Path>>(chunk_size: usize, path: P) -> Result<SortAndWriteHandler<T, S>, Error> {
-
+    pub fn new<P: AsRef<Path>>(
+        chunk_size: usize,
+        path: P,
+    ) -> Result<SortAndWriteHandler<T, S>, Error> {
         let file = File::create(path)?;
 
         Ok(SortAndWriteHandler {
@@ -532,7 +525,9 @@ where
 
         self.regions.push(reg);
         self.cursor += self.compress_buffer.len();
-        let l = self.file.write_at(&self.compress_buffer, cur_offset as u64)?;
+        let l = self
+            .file
+            .write_at(&self.compress_buffer, cur_offset as u64)?;
 
         Ok(l)
     }
@@ -546,17 +541,18 @@ where
         let index_block_position = self.cursor;
         let index_block_size = buf.len();
 
-        self.file.write_at(buf.as_slice(), index_block_position as u64)?;
+        self.file
+            .write_at(buf.as_slice(), index_block_position as u64)?;
 
         self.file.seek(SeekFrom::Start(
             (index_block_position + index_block_size) as u64,
         ))?;
         self.file.write_u64::<BigEndian>(0 as u64)?;
-        self.file.write_u64::<BigEndian>(index_block_position as u64)?;
+        self.file
+            .write_u64::<BigEndian>(index_block_position as u64)?;
         self.file.write_u64::<BigEndian>(index_block_size as u64)?;
         Ok(())
     }
-
 }
 
 /// Sort buffered items, break large buffer into chunks.
@@ -569,7 +565,7 @@ where
     <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
     sender_buffer_size: usize,
-    state_machine: BufferStateMachine<T, SortAndWriteHandler<T,S>>,
+    state_machine: BufferStateMachine<T, SortAndWriteHandler<T, S>>,
     closed: AtomicBool,
 }
 
@@ -585,7 +581,6 @@ where
         sender_buffer_size: usize,
         path: impl AsRef<Path>,
     ) -> Result<ShardWriterInner<T, S>, Error> {
-
         let handler = SortAndWriteHandler::new(chunk_size, path)?;
 
         let bufs = BufStates::FillAndWait(
@@ -627,13 +622,13 @@ where
 /// A handle that is used to send data to a `ShardWriter`. Each thread that is producing data
 /// needs it's own ShardSender. A `ShardSender` can be obtained with the `get_sender` method of
 /// `ShardWriter`.  ShardSender implement clone.
-pub struct ShardSender<T, S> 
+pub struct ShardSender<T, S>
 where
     T: Send + Serialize,
     S: SortKey<T>,
     <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
-    writer: Option<Arc<ShardWriterInner<T, S>>>, 
+    writer: Option<Arc<ShardWriterInner<T, S>>>,
     buffer: Vec<T>,
     buf_size: usize,
 }
@@ -645,7 +640,6 @@ where
     <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
     fn new(writer: Arc<ShardWriterInner<T, S>>) -> ShardSender<T, S> {
-
         let buffer = Vec::with_capacity(writer.sender_buffer_size);
         let buf_size = writer.sender_buffer_size;
 
@@ -664,11 +658,10 @@ where
         };
 
         if send {
-            self
-            .writer
-            .as_ref()
-            .expect("ShardSender is already closed")
-            .send_items(&mut self.buffer)?;
+            self.writer
+                .as_ref()
+                .expect("ShardSender is already closed")
+                .send_items(&mut self.buffer)?;
         }
 
         Ok(())
@@ -678,7 +671,6 @@ where
     /// if the `ShardSender` is dropped. You must call `finished()` or drop the `ShardSender`
     /// prior to calling `ShardWriter::finish` or dropping the ShardWriter, or you will get a panic.
     pub fn finished(&mut self) -> Result<(), Error> {
-
         // send any remaining items and drop the Arc<ShardWriterInner>
         if let Some(inner) = self.writer.take() {
             if self.buffer.len() > 0 {
@@ -707,7 +699,6 @@ where
     }
 }
 
-
 impl<T: Send, S: SortKey<T>> Drop for ShardSender<T, S>
 where
     T: Send + Serialize,
@@ -718,7 +709,6 @@ where
         let _e = self.finished();
     }
 }
-
 
 /// Read a shardio file
 struct ShardReaderSingle<T, S = DefaultSort>
@@ -1570,15 +1560,18 @@ mod shard_tests {
         s: PhantomData<S>,
     }
 
-    impl<T,S> ThreadSender<T, S>
-    where 
+    impl<T, S> ThreadSender<T, S>
+    where
         T: 'static + Send + Serialize + Clone,
         S: 'static + SortKey<T>,
         <S as SortKey<T>>::Key: Ord + Clone + Serialize + Send,
     {
-        fn send_from_threads(items: &[T], sender: ShardSender<T, S>, n: usize) -> Result<(), Error> {
-
-            let barrier = Arc::new(std::sync::Barrier::new(n+1));
+        fn send_from_threads(
+            items: &[T],
+            sender: ShardSender<T, S>,
+            n: usize,
+        ) -> Result<(), Error> {
+            let barrier = Arc::new(std::sync::Barrier::new(n + 1));
             let mut handles = Vec::new();
 
             for _chunk in items.chunks(items.len() / n) {
@@ -1586,28 +1579,24 @@ mod shard_tests {
                 let chunk: Vec<T> = _chunk.iter().cloned().collect();
                 let barrier = barrier.clone();
 
-                let h = std::thread::spawn(
-                    move || -> Result<(), Error>
-                    {
-                        barrier.wait();
-                        for c in chunk {
-                            s.send(c)?;
-                        }
-                        Ok(())
+                let h = std::thread::spawn(move || -> Result<(), Error> {
+                    barrier.wait();
+                    for c in chunk {
+                        s.send(c)?;
                     }
-                );
+                    Ok(())
+                });
 
                 handles.push(h);
             }
 
-            for h in handles { 
+            for h in handles {
                 h.join().unwrap()?;
             }
 
             Ok(())
         }
     }
-
 
     fn check_round_trip_opt(
         disk_chunk_size: usize,
@@ -1655,7 +1644,7 @@ mod shard_tests {
                 assert_eq!(&true_items, &all_items);
             }
 
-            for rc in [1].iter() { //, 3, 8, 15, 27].iter() {
+            for rc in [1, 3, 8, 15, 27].iter() {
                 // Open finished file & test chunked reads
                 let set_reader = ShardReader::<T1>::open(&tmp.path())?;
                 let mut all_items_chunks = Vec::new();
