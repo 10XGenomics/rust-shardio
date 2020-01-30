@@ -659,7 +659,7 @@ where
 /// A handle that is used to send data to a `ShardWriter`. Each thread that is producing data
 /// needs it's own ShardSender. A `ShardSender` can be obtained with the `get_sender` method of
 /// `ShardWriter`.  ShardSender implement clone.
-pub struct ShardSender<T, S>
+pub struct ShardSender<T, S = DefaultSort>
 where
     T: Send + Serialize,
     S: SortKey<T>,
