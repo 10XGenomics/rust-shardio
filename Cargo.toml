@@ -1,6 +1,6 @@
 [package]
 name = "shardio"
-version = "0.5.4"
+version = "0.6.0"
 authors = ["Patrick Marks <patrick@10xgenomics.com>", "Sreenath Krishnan <sreenath.krishnan@10xgenomics.com>", "Lance Hepler <lance.hepler@10xgenomics.com>"]
 edition = "2018"
 license = "MIT"
