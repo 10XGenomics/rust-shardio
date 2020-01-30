@@ -2,7 +2,6 @@ use bincode;
 use criterion;
 use fxhash;
 use lz4;
-use nix;
 use tempfile;
 
 use std::fs::File;
