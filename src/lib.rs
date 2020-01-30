@@ -67,6 +67,7 @@
 //!     let mut all_items_sorted = all_items.clone();
 //!     all_items.sort();
 //!     assert_eq!(all_items, all_items_sorted);
+//!     std::fs::remove_file(filename)?;
 //!     Ok(())
 //! }
 //! ```
@@ -74,9 +75,9 @@
 #![deny(warnings)]
 #![deny(missing_docs)]
 use lz4;
-
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use std::any::type_name;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -91,13 +92,17 @@ use min_max_heap::MinMaxHeap;
 use std::marker::PhantomData;
 use std::thread;
 
-use bincode::{deserialize_from, serialize_into};
+use bincode::serialize_into;
+
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use std::sync::atomic::AtomicBool;
 
-use failure::Error;
+use failure::{Error, format_err};
 use std::sync::Mutex;
+use log::warn;
+use rustc_version_runtime::version;
+use semver::Version;
 
 /// Represent a range of key space
 pub mod range;
@@ -574,6 +579,7 @@ where
     fn write_index(&mut self) -> Result<(), Error> {
         let mut buf = Vec::new();
 
+        serialize_into(&mut buf, &(version(), type_name::<T>(), type_name::<S>()))?;
         serialize_into(&mut buf, &self.regions)?;
 
         let index_block_position = self.cursor;
@@ -748,6 +754,7 @@ where
 {
     file: File,
     index: Vec<ShardRecord<<S as SortKey<T>>::Key>>,
+    binconfig: bincode::Config,
     p1: PhantomData<T>,
 }
 
@@ -759,29 +766,55 @@ where
 {
     /// Open a shard file that stores `T` items.
     fn open<P: AsRef<Path>>(path: P) -> Result<ShardReaderSingle<T, S>, Error> {
-        let mut f = File::open(path).unwrap();
+        let f = File::open(path).unwrap();
 
-        let mut index = Self::read_index_block(&mut f)?;
+        let mut binconfig = bincode::config();
+        // limit ourselves to decoding no more than 268MB at a time
+        binconfig.limit(1 << 28);
+
+        let (mut index, f) = Self::read_index_block(f, &binconfig)?;
         index.sort();
 
         Ok(ShardReaderSingle {
             file: f,
             index,
+            binconfig,
             p1: PhantomData,
         })
     }
 
     /// Read shard index
     fn read_index_block(
-        file: &mut File,
-    ) -> Result<Vec<ShardRecord<<S as SortKey<T>>::Key>>, Error> {
+        mut file: File,
+        binconfig: &bincode::Config,
+    ) -> Result<(Vec<ShardRecord<<S as SortKey<T>>::Key>>, File), Error> {
         let _ = file.seek(SeekFrom::End(-24))?;
         let _num_shards = file.read_u64::<BigEndian>()? as usize;
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position as u64))?;
-
-        Ok(deserialize_from(file)?)
+        let (ver, t_typ, s_typ): (Version, String, String) =
+            binconfig.deserialize_from(&mut file)?;
+        if ver != version() {
+            warn!(
+                "expected compiler version {}, got {}; types may be incompatible",
+                version(),
+                ver
+            );
+        } else {
+            // if compiler version is the same, type misnaming is an error
+            if t_typ != type_name::<T>() || s_typ != type_name::<S>() {
+                return Err(format_err!(
+                    "Expected type {} with sort order {}, but got type {} with sort order {}",
+                    type_name::<T>(),
+                    type_name::<S>(),
+                    t_typ,
+                    s_typ,
+                ));
+            }
+        }
+        let recs = binconfig.deserialize_from(&mut file)?;
+        Ok((recs, file))
     }
 
     /// Return an iterator over the items in the given `range` of keys.
@@ -844,6 +877,7 @@ where
     next_item: Option<T>,
     decoder: lz4::Decoder<BufReader<ReadAdapter<'a>>>,
     items_remaining: usize,
+    binconfig: &'a bincode::Config,
     phantom_s: PhantomData<S>,
 }
 
@@ -861,13 +895,15 @@ where
         let buf_reader = BufReader::new(adp_reader);
         let mut lz4_reader = lz4::Decoder::new(buf_reader)?;
 
-        let first_item: T = deserialize_from(&mut lz4_reader)?;
+        let binconfig = &reader.binconfig;
+        let first_item: T = binconfig.deserialize_from(&mut lz4_reader)?;
         let items_remaining = rec.len_items - 1;
 
         Ok(ShardIter {
             next_item: Some(first_item),
             decoder: lz4_reader,
             items_remaining,
+            binconfig,
             phantom_s: PhantomData,
         })
     }
@@ -881,7 +917,7 @@ where
         if self.items_remaining == 0 {
             Ok((item, None))
         } else {
-            self.next_item = Some(deserialize_from(&mut self.decoder)?);
+            self.next_item = Some(self.binconfig.deserialize_from(&mut self.decoder)?);
             self.items_remaining -= 1;
             Ok((item, Some(self)))
         }
@@ -1309,7 +1345,6 @@ mod shard_tests {
     use std::fmt::Debug;
     use std::hash::Hash;
     use std::iter::{repeat, FromIterator};
-    use failure::format_err;
     use std::u8;
     use tempfile;
 
@@ -1865,5 +1900,93 @@ mod shard_tests {
         }
 
         Err(format_err!("didn't shardio IO error correctly"))
+    }
+
+    #[derive(Copy, Clone, Serialize, Deserialize, Debug)]
+    struct T2(u16);
+
+    #[derive(Copy, Clone, Serialize, Deserialize, Debug)]
+    struct T3(u16);
+
+    struct S2 {}
+    struct S3 {}
+
+    impl SortKey<T2> for S2 {
+        type Key = u16;
+        fn sort_key(v: &T2) -> Cow<u16> {
+            Cow::Owned(v.0)
+        }
+    }
+
+    impl SortKey<T3> for S2 {
+        type Key = u16;
+        fn sort_key(v: &T3) -> Cow<u16> {
+            Cow::Owned(v.0)
+        }
+    }
+
+    impl SortKey<T2> for S3 {
+        type Key = u16;
+        fn sort_key(v: &T2) -> Cow<u16> {
+            Cow::Owned(v.0)
+        }
+    }
+
+    #[test]
+    fn test_ttyp_error() -> Result<(), Error> {
+        let disk_chunk_size = 1 << 20;
+        let producer_chunk_size = 1 << 4;
+        let buffer_size = 1 << 16;
+
+        let tmp = tempfile::NamedTempFile::new()?;
+
+        {
+            let manager: ShardWriter<T2, S2> = ShardWriter::new(
+                tmp.path(),
+                producer_chunk_size,
+                disk_chunk_size,
+                buffer_size,
+            )?;
+            let mut sender = manager.get_sender();
+            sender.send(T2(0))?;
+        }
+        {
+            let reader = ShardReader::<T3, S2>::open(tmp.path());
+            assert!(reader.is_err());
+            if let Err(err) = reader {
+                println!("{}", err);
+            }
+        }
+        tmp.close()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_styp_error() -> Result<(), Error> {
+        let disk_chunk_size = 1 << 20;
+        let producer_chunk_size = 1 << 4;
+        let buffer_size = 1 << 16;
+
+        let tmp = tempfile::NamedTempFile::new()?;
+
+        {
+            let manager: ShardWriter<T2, S2> = ShardWriter::new(
+                tmp.path(),
+                producer_chunk_size,
+                disk_chunk_size,
+                buffer_size,
+            )?;
+            let mut sender = manager.get_sender();
+            sender.send(T2(0))?;
+        }
+        {
+            let reader = ShardReader::<T2, S3>::open(tmp.path());
+            assert!(reader.is_err());
+            if let Err(err) = reader {
+                println!("{}", err);
+            }
+        }
+        tmp.close()?;
+        Ok(())
     }
 }
