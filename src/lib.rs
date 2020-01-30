@@ -96,7 +96,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use std::sync::atomic::AtomicBool;
 
-use failure::{format_err, Error};
+use failure::Error;
 use std::sync::Mutex;
 
 /// Represent a range of key space
@@ -319,7 +319,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
     /// then the calling thread will be used to process the full buffer. 
     fn add_items(&self, items: &mut Vec<T>) -> Result<(), Error> {
         if self.closed.load(std::sync::atomic::Ordering::Relaxed) {
-            panic!("tried to add items to BufHandler after it was closed");
+            panic!("tried to add items to ShardSender after ShardWriter was closed");
         }
 
         loop {
@@ -604,7 +604,6 @@ where
 {
     sender_buffer_size: usize,
     state_machine: BufferStateMachine<T, SortAndWriteHandler<T, S>>,
-    closed: AtomicBool,
 }
 
 impl<T, S> ShardWriterInner<T, S>
@@ -636,17 +635,11 @@ where
         Ok(ShardWriterInner {
             sender_buffer_size,
             state_machine,
-            closed: std::sync::atomic::AtomicBool::from(false),
         })
     }
 
     fn send_items(&self, items: &mut Vec<T>) -> Result<(), Error> {
-        if !self.closed.load(std::sync::atomic::Ordering::Relaxed) {
-            self.state_machine.add_items(items)
-        } else {
-            let msg = format_err!("tried to send items after sender was closed");
-            Err(msg)
-        }
+        self.state_machine.add_items(items)
     }
 
     fn close(self) -> Result<usize, Error> {
@@ -1316,6 +1309,7 @@ mod shard_tests {
     use std::fmt::Debug;
     use std::hash::Hash;
     use std::iter::{repeat, FromIterator};
+    use failure::format_err;
     use std::u8;
     use tempfile;
 
