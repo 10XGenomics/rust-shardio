@@ -100,9 +100,6 @@ use std::sync::atomic::AtomicBool;
 
 use failure::{Error, format_err};
 use std::sync::Mutex;
-use log::warn;
-use rustc_version_runtime::version;
-use semver::Version;
 
 /// Represent a range of key space
 pub mod range;
@@ -244,7 +241,7 @@ where
                 Ok(inner) => inner.close(),
                 Err(_) => {
                     if !std::thread::panicking() {
-                        panic!("ShardSenders are still active. They must all be out of scope before ShardWriter is closed");
+                        panic!("ShardSenders are still active. They must all be out of scope or finished() before ShardWriter is closed");
                     } else {
                         return Ok(0);
                     }
@@ -579,7 +576,7 @@ where
     fn write_index(&mut self) -> Result<(), Error> {
         let mut buf = Vec::new();
 
-        serialize_into(&mut buf, &(version(), type_name::<T>(), type_name::<S>()))?;
+        serialize_into(&mut buf, &(type_name::<T>(), type_name::<S>()))?;
         serialize_into(&mut buf, &self.regions)?;
 
         let index_block_position = self.cursor;
@@ -715,6 +712,7 @@ where
             }
         }
 
+        assert!(self.writer.is_none());
         Ok(())
     }
 }
@@ -793,25 +791,17 @@ where
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position as u64))?;
-        let (ver, t_typ, s_typ): (Version, String, String) =
+        let (t_typ, s_typ): (String, String) =
             binconfig.deserialize_from(&mut file)?;
-        if ver != version() {
-            warn!(
-                "expected compiler version {}, got {}; types may be incompatible",
-                version(),
-                ver
-            );
-        } else {
-            // if compiler version is the same, type misnaming is an error
-            if t_typ != type_name::<T>() || s_typ != type_name::<S>() {
-                return Err(format_err!(
-                    "Expected type {} with sort order {}, but got type {} with sort order {}",
-                    type_name::<T>(),
-                    type_name::<S>(),
-                    t_typ,
-                    s_typ,
-                ));
-            }
+        // if compiler version is the same, type misnaming is an error
+        if t_typ != type_name::<T>() || s_typ != type_name::<S>() {
+            return Err(format_err!(
+                "Expected type {} with sort order {}, but got type {} with sort order {}",
+                type_name::<T>(),
+                type_name::<S>(),
+                t_typ,
+                s_typ,
+            ));
         }
         let recs = binconfig.deserialize_from(&mut file)?;
         Ok((recs, file))
@@ -1405,14 +1395,14 @@ mod shard_tests {
             buf.push((i % 254) as u8);
         }
 
-        let written = tmp.write_at(&buf, 0).unwrap();
+        let written = tmp.as_file().write_at(&buf, 0).unwrap();
         assert_eq!(n, written);
 
         for i in 0..n {
             buf[i] = 0;
         }
 
-        let read = tmp.read_at(&mut buf, 0).unwrap();
+        let read = tmp.as_file().read_at(&mut buf, 0).unwrap();
         assert_eq!(n, read);
 
         for i in 0..n {
@@ -1465,7 +1455,7 @@ mod shard_tests {
     #[test]
     fn test_shard_round_trip_big() {
         // Play with these settings to test perf.
-        check_round_trip_opt(1024, 64, 1 << 18, 1 << 20, false);
+        check_round_trip_opt(1024, 64, 1 << 18, 1 << 20, false).unwrap();
     }
 
     #[test]
