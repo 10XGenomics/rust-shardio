@@ -74,32 +74,25 @@
 
 #![deny(warnings)]
 #![deny(missing_docs)]
-use lz4;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
 use std::any::type_name;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
-use std::os::unix::fs::FileExt;
-use std::ops::DerefMut;
-
-use std::path::Path;
-use std::sync::Arc;
-
-use min_max_heap::MinMaxHeap;
 use std::marker::PhantomData;
+use std::ops::DerefMut;
+use std::os::unix::fs::FileExt;
+use std::path::Path;
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::thread;
 
 use bincode::serialize_into;
-
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-
-use std::sync::atomic::AtomicBool;
-
-use failure::{Error, format_err};
-use std::sync::Mutex;
+use failure::{format_err, Error};
+use log::warn;
+use lz4;
+use min_max_heap::MinMaxHeap;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// Represent a range of key space
 pub mod range;
@@ -109,6 +102,12 @@ pub mod helper;
 
 pub use crate::range::Range;
 use range::Rorder;
+
+const SHARD_ITER_BUFSZ: usize = 32_768 + 8_192;
+
+// this number is chosen such that, for a 32KB lz4::Decoder and 8KB BufReader,
+//   represents at least 1GiB of memory
+const WARN_ACTIVE_SHARDS: usize = 26_214;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// A group of `len_items` items, from shard `shard`, stored at position `offset`, using `block_size` bytes on-disk,
@@ -294,7 +293,7 @@ enum BufAddOutcome<T> {
     Done,
     /// No free buffers, operation must be re-tried
     Retry,
-    /// Items added, but a buffer was filled and must be processed. 
+    /// Items added, but a buffer was filled and must be processed.
     /// Buffer to be processed is attached.
     Process(Vec<T>),
 }
@@ -316,17 +315,15 @@ impl<T> fmt::Debug for BufStates<T> {
 }
 
 impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
-
     /// Move `items` into the buffer & it. If a buffer is filled by this operation
-    /// then the calling thread will be used to process the full buffer. 
+    /// then the calling thread will be used to process the full buffer.
     fn add_items(&self, items: &mut Vec<T>) -> Result<(), Error> {
         if self.closed.load(std::sync::atomic::Ordering::Relaxed) {
             panic!("tried to add items to ShardSender after ShardWriter was closed");
         }
 
         loop {
-            
-            // get mutex on buffers 
+            // get mutex on buffers
             let mut buffer_state = self.buffer_state.lock().unwrap();
             let mut current_state = Dummy;
             std::mem::swap(buffer_state.deref_mut(), &mut current_state);
@@ -366,12 +363,12 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
                     self.process_buffer(&mut buf_to_process)?;
                     self.return_buffer(buf_to_process);
                     break;
-                },
+                }
                 Retry => {
                     // take a break before trying again.
                     thread::yield_now();
                     continue;
-                },
+                }
                 Done => break,
             }
         }
@@ -421,7 +418,6 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
 
     /// put a buffer back into service after processing
     fn return_buffer(&self, buf: Vec<T>) {
-
         let mut buffer_state = self.buffer_state.lock().unwrap();
         let mut current_state = BufStates::Dummy;
         std::mem::swap(buffer_state.deref_mut(), &mut current_state);
@@ -450,7 +446,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
     }
 }
 
-/// Two-part handler for a buffer needing processing. 
+/// Two-part handler for a buffer needing processing.
 /// `prepare_buf` is generic and needs no state. Used for sorting.
 /// `process_buf` needs exclusive access to the handler, so can do IO.
 trait BufHandler<T> {
@@ -483,7 +479,6 @@ where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
-
     /// Sort items according to `S`.
     fn prepare_buf(buf: &mut Vec<T>) {
         buf.sort_by(|x, y| S::sort_key(x).cmp(&S::sort_key(y)));
@@ -791,8 +786,7 @@ where
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position as u64))?;
-        let (t_typ, s_typ): (String, String) =
-            binconfig.deserialize_from(&mut file)?;
+        let (t_typ, s_typ): (String, String) = binconfig.deserialize_from(&mut file)?;
         // if compiler version is the same, type misnaming is an error
         if t_typ != type_name::<T>() || s_typ != type_name::<S>() {
             return Err(format_err!(
@@ -968,6 +962,7 @@ where
     range: Range<<S as SortKey<T>>::Key>,
     active_queue: MinMaxHeap<ShardIter<'a, T, S>>,
     waiting_queue: MinMaxHeap<&'a ShardRecord<<S as SortKey<T>>::Key>>,
+    warn_limit: usize,
 }
 
 impl<'a, T, S> RangeIter<'a, T, S>
@@ -998,12 +993,16 @@ where
             }
         }
 
-        Ok(RangeIter {
+        let mut iter = RangeIter {
             reader,
             range,
             active_queue,
             waiting_queue,
-        })
+            warn_limit: WARN_ACTIVE_SHARDS,
+        };
+        iter.warn_active_shards();
+
+        Ok(iter)
     }
 
     /// What key is next among the active set
@@ -1022,6 +1021,7 @@ where
             let iter = self.reader.iter_shard(shard)?;
             self.active_queue.push(iter);
         }
+        self.warn_active_shards();
         Ok(())
     }
 
@@ -1036,6 +1036,20 @@ where
             }
             Ok(item)
         })
+    }
+
+    /// Warn if the memory usage will be relevant
+    fn warn_active_shards(&mut self) {
+        let queue_len = self.active_queue.len();
+        if queue_len >= self.warn_limit {
+            let mem_est_gib = (SHARD_ITER_BUFSZ * queue_len) as f64 / 1024f64.powi(3);
+            warn!(
+                "{} active shards! Memory usage may be impacted by at least {} GiB",
+                queue_len, mem_est_gib
+            );
+            // raise the warn limit by 10% of observed so we don't spam the log
+            self.warn_limit = queue_len * 11 / 10;
+        }
     }
 }
 
