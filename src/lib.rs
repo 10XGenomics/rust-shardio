@@ -103,7 +103,8 @@ pub mod helper;
 pub use crate::range::Range;
 use range::Rorder;
 
-const SHARD_ITER_BUFSZ: usize = 32_768 + 8_192;
+/// The size (in bytes) of a ShardIter object (mostly buffers)
+pub const SHARD_ITER_BUFSZ: usize = 32_768 + 8_192;
 
 // this number is chosen such that, for a 32KB lz4::Decoder and 8KB BufReader,
 //   represents at least 1GiB of memory
