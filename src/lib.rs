@@ -103,7 +103,8 @@ pub mod helper;
 pub use crate::range::Range;
 use range::Rorder;
 
-const SHARD_ITER_BUFSZ: usize = 32_768 + 8_192;
+/// The size (in bytes) of a ShardIter object (mostly buffers)
+pub const SHARD_ITER_BUFSZ: usize = 32_768 + 8_192;
 
 // this number is chosen such that, for a 32KB lz4::Decoder and 8KB BufReader,
 //   represents at least 1GiB of memory
@@ -820,6 +821,20 @@ where
     pub fn len(&self) -> usize {
         self.index.iter().map(|x| x.len_items).sum()
     }
+
+    /// Estimate an upper bound on the total number of values held by a range
+    pub fn est_len_range(&self, range: &Range<<S as SortKey<T>>::Key>) -> usize {
+        self.index
+            .iter()
+            .map(|x| {
+                if range.intersects_shard(x) {
+                    x.len_items
+                } else {
+                    0
+                }
+            })
+            .sum::<usize>()
+    }
 }
 
 use std::io::BufReader;
@@ -981,12 +996,12 @@ where
             .filter(|x| range.intersects_shard(x))
             .collect();
 
-        let min_item = shards.iter().map(|x| x.start_key.clone()).min();
+        let min_item = shards.iter().map(|x| &x.start_key).min();
         let mut active_queue = MinMaxHeap::new();
         let mut waiting_queue = MinMaxHeap::new();
 
         for s in shards {
-            if Some(s.start_key.clone()) == min_item {
+            if Some(&s.start_key) == min_item {
                 active_queue.push(reader.iter_shard(s)?);
             } else {
                 waiting_queue.push(s);
@@ -1336,6 +1351,15 @@ where
         }
 
         chunks
+    }
+
+    /// Estimate an upper bound on the total number of values held by a range
+    #[allow(dead_code)]
+    pub fn est_len_range(&self, range: &Range<<S as SortKey<T>>::Key>) -> usize {
+        self.readers
+            .iter()
+            .map(|x| x.est_len_range(range))
+            .sum::<usize>()
     }
 }
 
