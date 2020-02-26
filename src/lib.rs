@@ -104,11 +104,19 @@ pub use crate::range::Range;
 use range::Rorder;
 
 /// The size (in bytes) of a ShardIter object (mostly buffers)
-pub const SHARD_ITER_BUFSZ: usize = 32_768 + 8_192;
+// ? sizeof(T)
+// + 8 usize items_remaining
+// + 8 &bincode::Config
+// + 8KB BufReader
+// + 32KB of lz4-rs internal buffer
+// + 64KB of lz4-sys default blockSize (x2)
+// + 128KB lz4-sys default blockLinked
+// + 4 lz4-sys checksum
+pub const SHARD_ITER_SZ: usize = 8 + 8 + 8_192 + 32_768 + 65_536 * 2 + 131_072 + 4;
 
-// this number is chosen such that, for a 32KB lz4::Decoder and 8KB BufReader,
-//   represents at least 1GiB of memory
-const WARN_ACTIVE_SHARDS: usize = 26_214;
+// this number is chosen such that, for the expected size of a ShardIter above,
+//   represents at least 1GiB of memory (1024^3 / 303124 =~ 3542.3)
+const WARN_ACTIVE_SHARDS: usize = 3_543;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// A group of `len_items` items, from shard `shard`, stored at position `offset`, using `block_size` bytes on-disk,
@@ -1057,7 +1065,7 @@ where
     fn warn_active_shards(&mut self) {
         let queue_len = self.active_queue.len();
         if queue_len >= self.warn_limit {
-            let mem_est_gib = (SHARD_ITER_BUFSZ * queue_len) as f64 / 1024f64.powi(3);
+            let mem_est_gib = (SHARD_ITER_SZ * queue_len) as f64 / 1024f64.powi(3);
             warn!(
                 "{} active shards! Memory usage may be impacted by at least {} GiB",
                 queue_len, mem_est_gib
