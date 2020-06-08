@@ -85,6 +85,7 @@ use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use bincode::serialize_into;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -480,6 +481,13 @@ where
     // Buffers for use when writing
     serialize_buffer: Vec<u8>,
     compress_buffer: Vec<u8>,
+
+    // counters for performance of I/O
+    serialize_duration: Duration,
+    compress_duration: Duration,
+    io_duration: Duration,
+    uncompressed_bytes: usize,
+    compressed_bytes: usize,
 }
 
 impl<T, S> BufHandler<T> for SortAndWriteHandler<T, S>
@@ -495,14 +503,31 @@ where
 
     /// Write items to disk chunks
     fn process_buf(&mut self, buf: &mut Vec<T>) -> Result<(), Error> {
+        // clear counters
+        self.serialize_duration = Duration::new(0,0);
+        self.compress_duration = Duration::new(0,0);
+        self.io_duration = Duration::new(0,0);
+        self.uncompressed_bytes = 0;
+        self.compressed_bytes = 0;
+        self.io_chunks = 0;
+
         // Write out the buffer chunks
         for c in buf.chunks(self.chunk_size) {
             self.write_chunk(c)?;
         }
 
+        println!("Wrote buffer:");
+        println!("io chunks: {}", self.io_chunks);
+        println!("serialize time: {}ms", self.serialize_duration.as_millis());
+        println!("compress time: {} ms", self.compress_duration.as_millis());
+        println!("io time: {} ms", self.io_duration.as_millis());
+        println!("raw bytes: {} kb", self.uncompressed_bytes >> 10);
+        println!("compressed bytes: {} kb", self.uncompressed_bytes >> 10);
+
         Ok(())
     }
 }
+
 
 impl<T, S> SortAndWriteHandler<T, S>
 where
@@ -523,6 +548,12 @@ where
             serialize_buffer: Vec::new(),
             compress_buffer: Vec::new(),
             chunk_size,
+            serialize_duration: Duration::new(0,0),
+            compress_duration: Duration::new(0,0),
+            io_duration: Duration::new(0,0),
+            uncompressed_bytes: 0,
+            compressed_bytes: 0,
+            io_chunks: 0,
         })
 
         // FIXME: write a magic string to the start of the file,
@@ -543,10 +574,15 @@ where
             S::sort_key(&items[items.len() - 1]).into_owned(),
         );
 
+        let now = Instant::now();
         for item in items {
             serialize_into(&mut self.serialize_buffer, item)?;
         }
+        self.serialize_duration += now.elapsed();
+        self.uncompressed_bytes += self.serialize_buffer.len();
 
+
+        let now = Instant::now();
         {
             use std::io::Write;
             let mut encoder = lz4::EncoderBuilder::new()
@@ -557,6 +593,8 @@ where
             let (_, result) = encoder.finish();
             result?;
         }
+        self.compress_duration += now.elapsed();
+        self.compressed_bytes += self.compress_buffer.len();
 
         let cur_offset = self.cursor;
         let reg = ShardRecord {
@@ -567,11 +605,14 @@ where
             len_items: items.len(),
         };
 
+        let now = Instant::now();
         self.regions.push(reg);
         self.cursor += self.compress_buffer.len();
         let l = self
             .file
             .write_at(&self.compress_buffer, cur_offset as u64)?;
+        self.io_duration += now.elapsed();
+        self.io_chunks += 1;
 
         Ok(l)
     }
