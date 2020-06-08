@@ -488,6 +488,7 @@ where
     io_duration: Duration,
     uncompressed_bytes: usize,
     compressed_bytes: usize,
+    io_chunks: usize,
 }
 
 impl<T, S> BufHandler<T> for SortAndWriteHandler<T, S>
