@@ -550,7 +550,10 @@ where
         {
             use std::io::Write;
             let mut encoder = lz4::EncoderBuilder::new()
-                .level(6) // this appears to be a good general trad-off of speed and compression ratio.
+                .level(2) // this appears to be a good general trad-off of speed and compression ratio.
+                          // note see these benchmarks for useful numers:
+                          // http://quixdb.github.io/squash-benchmark/#ratio-vs-compression
+                          // important note: lz4f (not lz4) is the relevant mode in those charts.
                 .build(&mut self.compress_buffer)?;
 
             encoder.write(&self.serialize_buffer)?;
