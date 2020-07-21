@@ -86,7 +86,7 @@ use std::path::Path;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::thread;
 
-use bincode::serialize_into;
+use bincode::{config::Options, serialize_into};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use failure::{format_err, Error};
 use log::warn;
@@ -752,6 +752,8 @@ where
     }
 }
 
+type BinOpts = bincode::config::WithOtherLimit<bincode::config::DefaultOptions, bincode::config::Bounded>;
+
 /// Read a shardio file
 struct ShardReaderSingle<T, S = DefaultSort>
 where
@@ -759,7 +761,7 @@ where
 {
     file: File,
     index: Vec<ShardRecord<<S as SortKey<T>>::Key>>,
-    binconfig: bincode::Config,
+    binconfig: BinOpts,
     p1: PhantomData<T>,
 }
 
@@ -773,9 +775,8 @@ where
     fn open<P: AsRef<Path>>(path: P) -> Result<ShardReaderSingle<T, S>, Error> {
         let f = File::open(path).unwrap();
 
-        let mut binconfig = bincode::config();
         // limit ourselves to decoding no more than 268MB at a time
-        binconfig.limit(1 << 28);
+        let binconfig = bincode::options().with_limit(1 << 28);
 
         let (mut index, f) = Self::read_index_block(f, &binconfig)?;
         index.sort();
@@ -791,7 +792,7 @@ where
     /// Read shard index
     fn read_index_block(
         mut file: File,
-        binconfig: &bincode::Config,
+        binconfig: &BinOpts,
     ) -> Result<(Vec<ShardRecord<<S as SortKey<T>>::Key>>, File), Error> {
         let _ = file.seek(SeekFrom::End(-24))?;
         let _num_shards = file.read_u64::<BigEndian>()? as usize;
@@ -888,7 +889,7 @@ where
     next_item: Option<T>,
     decoder: lz4::Decoder<BufReader<ReadAdapter<'a>>>,
     items_remaining: usize,
-    binconfig: &'a bincode::Config,
+    binconfig: &'a BinOpts,
     phantom_s: PhantomData<S>,
 }
 
