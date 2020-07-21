@@ -551,9 +551,9 @@ where
             use std::io::Write;
             let mut encoder = lz4::EncoderBuilder::new()
                 .level(2) // this appears to be a good general trad-off of speed and compression ratio.
-                          // note see these benchmarks for useful numers:
-                          // http://quixdb.github.io/squash-benchmark/#ratio-vs-compression
-                          // important note: lz4f (not lz4) is the relevant mode in those charts.
+                // note see these benchmarks for useful numers:
+                // http://quixdb.github.io/squash-benchmark/#ratio-vs-compression
+                // important note: lz4f (not lz4) is the relevant mode in those charts.
                 .build(&mut self.compress_buffer)?;
 
             encoder.write(&self.serialize_buffer)?;
@@ -821,6 +821,7 @@ where
         RangeIter::new(&self, range.clone())
     }
 
+    /// Return an iterator over the items in one disk shard (corresponding to one index entry)
     fn iter_shard(
         &self,
         rec: &ShardRecord<<S as SortKey<T>>::Key>,
@@ -918,10 +919,12 @@ where
         })
     }
 
+    /// Return the key of the next item in the iterator
     pub(crate) fn current_key(&self) -> Cow<'_, <S as SortKey<T>>::Key> {
         self.next_item.as_ref().map(|a| S::sort_key(a)).unwrap()
     }
 
+    /// Return the next item in the iterator
     pub(crate) fn pop(mut self) -> Result<(T, Option<Self>), Error> {
         let item = self.next_item.unwrap();
         if self.items_remaining == 0 {
@@ -1012,7 +1015,7 @@ where
         let mut waiting_queue = MinMaxHeap::new();
 
         for s in shards {
-            if Some(&s.start_key) == min_item {
+            if Some(&s.start_key) == min_item && active_queue.len() == 0 {
                 active_queue.push(reader.iter_shard(s)?);
             } else {
                 waiting_queue.push(s);
@@ -1040,7 +1043,7 @@ where
     /// Restore all the shards that start at or before this item, or the next usable shard
     fn activate_shards(&mut self) -> Result<(), Error> {
         while self.waiting_queue.peek_min().map_or(false, |shard| {
-            Some(Cow::Borrowed(&shard.start_key)) <= self.peek_active_next()
+            Some(Cow::Borrowed(&shard.start_key)) < self.peek_active_next()
         }) || (self.peek_active_next().is_none() && self.waiting_queue.len() > 0)
         {
             let shard = self.waiting_queue.pop_min().unwrap();
@@ -1073,17 +1076,19 @@ where
                 "{} active shards! Memory usage may be impacted by at least {} GiB",
                 queue_len, mem_est_gib
             );
+
             // raise the warn limit by 10% of observed so we don't spam the log
             self.warn_limit = queue_len * 11 / 10;
-        }
-    }
-}
 
-fn transpose<T, E>(v: Option<Result<T, E>>) -> Result<Option<T>, E> {
-    match v {
-        Some(Ok(v)) => Ok(Some(v)),
-        Some(Err(e)) => Err(e),
-        None => Ok(None),
+            // you may hit this in a new test if you make a very large number chunks.
+            #[cfg(test)]
+            {
+                panic!(
+                    "{} active shards! Memory usage may be impacted by at least {} GiB. You should not hit this in the test suite.",
+                    queue_len, mem_est_gib
+                );
+            }
+        }
     }
 }
 
@@ -1190,7 +1195,7 @@ where
         let mut merge_heap = MinMaxHeap::new();
 
         for (idx, itr) in iterators.iter_mut().enumerate() {
-            let item = transpose(itr.next())?;
+            let item = itr.next().transpose()?;
 
             // If we have a next item, add it's key to the heap
             item.map(|ii| {
@@ -1222,7 +1227,7 @@ where
 
         next_itr.map(|(item, i)| {
             // Get next-next value for this iterator
-            let next = transpose(self.iterators[i].next())?;
+            let next = self.iterators[i].next().transpose()?;
 
             // Push the next-next key onto the heap
             match next {
@@ -1406,6 +1411,34 @@ mod shard_tests {
         }
     }
 
+    impl T1 {
+        fn non_rand_key<G: Gen>(g: &mut G) -> T1 {
+            if bool::arbitrary(g) {
+                if bool::arbitrary(g) {
+                    T1 {
+                        a: u64::arbitrary(g),
+                        b: u32::arbitrary(g),
+                        c: u16::arbitrary(g),
+                        d: 0,
+                    }
+                } else {
+                    T1 {
+                        a: u64::arbitrary(g),
+                        b: u32::arbitrary(g),
+                        c: u16::arbitrary(g),
+                        d: 255,
+                    }
+                }
+            } else {
+                T1 {
+                    a: u64::arbitrary(g),
+                    b: u32::arbitrary(g),
+                    c: u16::arbitrary(g),
+                    d: 27,
+                }
+            }
+        }
+    }
     struct FieldDSort;
     impl SortKey<T1> for FieldDSort {
         type Key = u8;
@@ -1417,7 +1450,12 @@ mod shard_tests {
     fn rand_items(n: usize, g: &mut impl Gen) -> Vec<T1> {
         let mut items = Vec::new();
         for _ in 0..n {
-            let tt = T1::arbitrary(g);
+            let tt = if bool::arbitrary(g) {
+                T1::non_rand_key(g)
+            } else {
+                T1::arbitrary(g)
+            };
+
             items.push(tt);
         }
         items
@@ -1497,6 +1535,19 @@ mod shard_tests {
         check_round_trip_sort_key(128, 16, 1 << 15, 1 << 16, true)?;
 
         Ok(())
+    }
+
+    #[test]
+    fn test_shard_round_trip_sort_key_too_many_active_readers() -> Result<(), Error> {
+        check_round_trip_sort_key(8, 1, 1 << 15, 1 << 17, true)?;
+        Ok(())
+    }
+
+    #[cfg(feature = "full-test")]
+    #[test]
+    fn test_shard_round_trip_sort_key_big() {
+        // this test will fail if we open more shards than we strictly need to
+        check_round_trip_sort_key(256, 64, 1 << 15, 1 << 23, true).unwrap();
     }
 
     // Only run this test in release mode for perf testing
