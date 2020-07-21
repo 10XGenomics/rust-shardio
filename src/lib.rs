@@ -86,7 +86,7 @@ use std::path::Path;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::thread;
 
-use bincode::{config::Options, serialize_into};
+use bincode::{deserialize_from, serialize_into};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use failure::{format_err, Error};
 use log::warn;
@@ -752,8 +752,6 @@ where
     }
 }
 
-type BinOpts = bincode::config::WithOtherLimit<bincode::config::DefaultOptions, bincode::config::Bounded>;
-
 /// Read a shardio file
 struct ShardReaderSingle<T, S = DefaultSort>
 where
@@ -761,7 +759,6 @@ where
 {
     file: File,
     index: Vec<ShardRecord<<S as SortKey<T>>::Key>>,
-    binconfig: BinOpts,
     p1: PhantomData<T>,
 }
 
@@ -775,16 +772,12 @@ where
     fn open<P: AsRef<Path>>(path: P) -> Result<ShardReaderSingle<T, S>, Error> {
         let f = File::open(path).unwrap();
 
-        // limit ourselves to decoding no more than 268MB at a time
-        let binconfig = bincode::options().with_limit(1 << 28);
-
-        let (mut index, f) = Self::read_index_block(f, &binconfig)?;
+        let (mut index, f) = Self::read_index_block(f)?;
         index.sort();
 
         Ok(ShardReaderSingle {
             file: f,
             index,
-            binconfig,
             p1: PhantomData,
         })
     }
@@ -792,14 +785,13 @@ where
     /// Read shard index
     fn read_index_block(
         mut file: File,
-        binconfig: &BinOpts,
     ) -> Result<(Vec<ShardRecord<<S as SortKey<T>>::Key>>, File), Error> {
         let _ = file.seek(SeekFrom::End(-24))?;
         let _num_shards = file.read_u64::<BigEndian>()? as usize;
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position as u64))?;
-        let (t_typ, s_typ): (String, String) = binconfig.deserialize_from(&mut file)?;
+        let (t_typ, s_typ): (String, String) = deserialize_from(&mut file)?;
         // if compiler version is the same, type misnaming is an error
         if t_typ != type_name::<T>() || s_typ != type_name::<S>() {
             return Err(format_err!(
@@ -810,7 +802,7 @@ where
                 s_typ,
             ));
         }
-        let recs = binconfig.deserialize_from(&mut file)?;
+        let recs = deserialize_from(&mut file)?;
         Ok((recs, file))
     }
 
@@ -889,7 +881,6 @@ where
     next_item: Option<T>,
     decoder: lz4::Decoder<BufReader<ReadAdapter<'a>>>,
     items_remaining: usize,
-    binconfig: &'a BinOpts,
     phantom_s: PhantomData<S>,
 }
 
@@ -907,15 +898,13 @@ where
         let buf_reader = BufReader::new(adp_reader);
         let mut lz4_reader = lz4::Decoder::new(buf_reader)?;
 
-        let binconfig = &reader.binconfig;
-        let first_item: T = binconfig.deserialize_from(&mut lz4_reader)?;
+        let first_item: T = deserialize_from(&mut lz4_reader)?;
         let items_remaining = rec.len_items - 1;
 
         Ok(ShardIter {
             next_item: Some(first_item),
             decoder: lz4_reader,
             items_remaining,
-            binconfig,
             phantom_s: PhantomData,
         })
     }
@@ -931,7 +920,7 @@ where
         if self.items_remaining == 0 {
             Ok((item, None))
         } else {
-            self.next_item = Some(self.binconfig.deserialize_from(&mut self.decoder)?);
+            self.next_item = Some(deserialize_from(&mut self.decoder)?);
             self.items_remaining -= 1;
             Ok((item, Some(self)))
         }
