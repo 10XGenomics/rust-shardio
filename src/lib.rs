@@ -1080,6 +1080,7 @@ where
             // raise the warn limit by 10% of observed so we don't spam the log
             self.warn_limit = queue_len * 11 / 10;
 
+            // you may hit this in a new test if you make a very large number chunks.
             #[cfg(test)]
             {
                 panic!(
