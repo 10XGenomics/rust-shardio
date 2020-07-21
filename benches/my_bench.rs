@@ -118,7 +118,7 @@ fn main() {
     }
 
     fn test_shard_round_trip_big() {
-        check_round_trip(2048, 32, 1 << 13, 1 << 18);
+        check_round_trip(2048, 32, 1 << 13, 1 << 17);
     }
 
     fn benchmark_roundtrip(c: &mut Criterion) {
