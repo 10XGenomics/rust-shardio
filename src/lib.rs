@@ -878,7 +878,7 @@ struct ShardIter<'a, T, S>
 where
     S: SortKey<T>,
 {
-    next_item: Option<T>,
+    next_item: Option<(T, S::Key)>,
     decoder: lz4::Decoder<BufReader<ReadAdapter<'a>>>,
     items_remaining: usize,
     phantom_s: PhantomData<S>,
@@ -899,10 +899,11 @@ where
         let mut lz4_reader = lz4::Decoder::new(buf_reader)?;
 
         let first_item: T = deserialize_from(&mut lz4_reader)?;
+        let first_key = S::sort_key(&first_item).into_owned();
         let items_remaining = rec.len_items - 1;
 
         Ok(ShardIter {
-            next_item: Some(first_item),
+            next_item: Some((first_item, first_key)),
             decoder: lz4_reader,
             items_remaining,
             phantom_s: PhantomData,
@@ -910,19 +911,22 @@ where
     }
 
     /// Return the key of the next item in the iterator
-    pub(crate) fn current_key(&self) -> Cow<'_, <S as SortKey<T>>::Key> {
-        self.next_item.as_ref().map(|a| S::sort_key(a)).unwrap()
+    pub(crate) fn current_key(&self) -> &<S as SortKey<T>>::Key {
+        self.next_item.as_ref().map(|a| &a.1).unwrap()
     }
 
     /// Return the next item in the iterator
     pub(crate) fn pop(mut self) -> Result<(T, Option<Self>), Error> {
         let item = self.next_item.unwrap();
         if self.items_remaining == 0 {
-            Ok((item, None))
+            Ok((item.0, None))
         } else {
-            self.next_item = Some(deserialize_from(&mut self.decoder)?);
+            let next_item = deserialize_from(&mut self.decoder)?;
+            let next_key = S::sort_key(&next_item).into_owned();
+
+            self.next_item = Some((next_item, next_key));
             self.items_remaining -= 1;
-            Ok((item, Some(self)))
+            Ok((item.0, Some(self)))
         }
     }
 }
@@ -935,8 +939,8 @@ where
     <S as SortKey<T>>::Key: Ord + Clone,
 {
     fn cmp(&self, other: &ShardIter<'a, T, S>) -> Ordering {
-        let key_self = self.next_item.as_ref().map(|a| S::sort_key(a));
-        let key_other = other.next_item.as_ref().map(|b| S::sort_key(b));
+        let key_self = self.next_item.as_ref().map(|a| &a.1);
+        let key_other = other.next_item.as_ref().map(|b| &b.1);
         key_self.cmp(&key_other)
     }
 }
@@ -964,8 +968,8 @@ where
     <S as SortKey<T>>::Key: Ord + Clone,
 {
     fn eq(&self, other: &ShardIter<'a, T, S>) -> bool {
-        let key_self = self.next_item.as_ref().map(|a| S::sort_key(a));
-        let key_other = other.next_item.as_ref().map(|b| S::sort_key(b));
+        let key_self = self.next_item.as_ref().map(|a| &a.1);
+        let key_other = other.next_item.as_ref().map(|b| &b.1);
         key_self == key_other
     }
 }
@@ -1025,7 +1029,7 @@ where
     }
 
     /// What key is next among the active set
-    fn peek_active_next(&self) -> Option<Cow<'_, <S as SortKey<T>>::Key>> {
+    fn peek_active_next(&self) -> Option<&<S as SortKey<T>>::Key> {
         let n = self.active_queue.peek_min();
         n.map(|v| v.current_key())
     }
@@ -1033,7 +1037,7 @@ where
     /// Restore all the shards that start at or before this item, or the next usable shard
     fn activate_shards(&mut self) -> Result<(), Error> {
         while self.waiting_queue.peek_min().map_or(false, |shard| {
-            Some(Cow::Borrowed(&shard.start_key)) < self.peek_active_next()
+            Some(&shard.start_key) < self.peek_active_next()
         }) || (self.peek_active_next().is_none() && self.waiting_queue.len() > 0)
         {
             let shard = self.waiting_queue.pop_min().unwrap();
@@ -1113,54 +1117,50 @@ where
     }
 }
 
-struct SortableItem<T, S> {
+struct SortableItem<K, T> {
+    key: K,
     item: T,
-    phantom_s: PhantomData<S>,
 }
 
-impl<T, S> SortableItem<T, S> {
-    fn new(item: T) -> SortableItem<T, S> {
+impl<K, T> SortableItem<K, T> {
+    fn new(key: K, item: T) -> SortableItem<K, T> {
         SortableItem {
+            key,
             item,
-            phantom_s: PhantomData,
         }
     }
 }
 
-impl<T, S> Ord for SortableItem<T, S>
+impl<K, T> Ord for SortableItem<K, T>
 where
-    S: SortKey<T>,
-    <S as SortKey<T>>::Key: Ord + Clone,
+    K: Ord + Clone,
 {
-    fn cmp(&self, other: &SortableItem<T, S>) -> Ordering {
-        S::sort_key(&self.item).cmp(&S::sort_key(&other.item))
+    fn cmp(&self, other: &SortableItem<K, T>) -> Ordering {
+        self.key.cmp(&other.key)
     }
 }
 
-impl<T, S> PartialOrd for SortableItem<T, S>
+impl<K, T> PartialOrd for SortableItem<K, T>
 where
-    S: SortKey<T>,
-    <S as SortKey<T>>::Key: Ord + Clone,
+    K: Ord + Clone,
 {
-    fn partial_cmp(&self, other: &SortableItem<T, S>) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &SortableItem<K, T>) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T, S> PartialEq for SortableItem<T, S>
-where
-    S: SortKey<T>,
-    <S as SortKey<T>>::Key: Ord + Clone,
+impl<K, T> PartialEq for SortableItem<K, T>
+where 
+    K: Ord + Clone,
 {
-    fn eq(&self, other: &SortableItem<T, S>) -> bool {
-        S::sort_key(&self.item) == S::sort_key(&other.item)
+    fn eq(&self, other: &SortableItem<K, T>) -> bool {
+        &self.key == &other.key
     }
 }
 
-impl<T, S> Eq for SortableItem<T, S>
+impl<K, T> Eq for SortableItem<K, T>
 where
-    S: SortKey<T>,
-    <S as SortKey<T>>::Key: Ord + Clone,
+    K: Ord + Clone,
 {
 }
 
@@ -1171,7 +1171,7 @@ where
     <S as SortKey<T>>::Key: 'a + Ord + Clone,
 {
     iterators: Vec<RangeIter<'a, T, S>>,
-    merge_heap: MinMaxHeap<(SortableItem<T, S>, usize)>,
+    merge_heap: MinMaxHeap<(SortableItem<S::Key, T>, usize)>,
     phantom_s: PhantomData<S>,
 }
 
@@ -1189,7 +1189,8 @@ where
 
             // If we have a next item, add it's key to the heap
             item.map(|ii| {
-                let sortable_item = SortableItem::new(ii);
+                let key = S::sort_key(&ii).into_owned();
+                let sortable_item = SortableItem::new(key ,ii);
                 merge_heap.push((sortable_item, idx));
             });
         }
@@ -1221,7 +1222,10 @@ where
 
             // Push the next-next key onto the heap
             match next {
-                Some(next_item) => self.merge_heap.push((SortableItem::new(next_item), i)),
+                Some(next_item) => {
+                    let key = S::sort_key(&next_item).into_owned();
+                    self.merge_heap.push((SortableItem::new(key, next_item), i));
+                },
                 _ => (),
             };
 
