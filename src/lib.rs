@@ -1124,10 +1124,7 @@ struct SortableItem<K, T> {
 
 impl<K, T> SortableItem<K, T> {
     fn new(key: K, item: T) -> SortableItem<K, T> {
-        SortableItem {
-            key,
-            item,
-        }
+        SortableItem { key, item }
     }
 }
 
@@ -1150,7 +1147,7 @@ where
 }
 
 impl<K, T> PartialEq for SortableItem<K, T>
-where 
+where
     K: Ord + Clone,
 {
     fn eq(&self, other: &SortableItem<K, T>) -> bool {
@@ -1158,11 +1155,7 @@ where
     }
 }
 
-impl<K, T> Eq for SortableItem<K, T>
-where
-    K: Ord + Clone,
-{
-}
+impl<K, T> Eq for SortableItem<K, T> where K: Ord + Clone {}
 
 /// Iterator over merged shardio files
 pub struct MergeIterator<'a, T: 'a, S: 'a>
@@ -1190,7 +1183,7 @@ where
             // If we have a next item, add it's key to the heap
             item.map(|ii| {
                 let key = S::sort_key(&ii).into_owned();
-                let sortable_item = SortableItem::new(key ,ii);
+                let sortable_item = SortableItem::new(key, ii);
                 merge_heap.push((sortable_item, idx));
             });
         }
@@ -1225,7 +1218,7 @@ where
                 Some(next_item) => {
                     let key = S::sort_key(&next_item).into_owned();
                     self.merge_heap.push((SortableItem::new(key, next_item), i));
-                },
+                }
                 _ => (),
             };
 
