@@ -771,6 +771,7 @@ where
     /// Open a shard file that stores `T` items.
     fn open<P: AsRef<Path>>(path: P) -> Result<ShardReaderSingle<T, S>, Error> {
         let f = File::open(path).unwrap();
+        advise_file_random(&f);
 
         let (mut index, f) = Self::read_index_block(f)?;
         index.sort();
@@ -853,11 +854,34 @@ struct ReadAdapter<'a> {
 
 impl<'a> ReadAdapter<'a> {
     fn new(file: &'a File, offset: usize, len: usize) -> Self {
+
+        advise_will_need(file, offset, len);
+
         ReadAdapter {
             file,
             offset,
             bytes_remaining: len,
         }
+    }
+}
+
+/// Instruct kernel that we will read a given part of the file soon. Only works on Linux.
+#[allow(unused_variables)]
+fn advise_will_need(file: &File, offset: usize, len: usize) {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        use std::os::unix::io::AsRawFd;
+        libc::posix_fadvise(file.as_raw_fd(), offset, len, libc::POSIX_FADV_WILLNEED);
+    }
+}
+
+/// Instruct kernel that reads will be random over the file. Only works on Linux.
+#[allow(unused_variables)]
+fn advise_file_random(file: &File) {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        use std::os::unix::io::AsRawFd;
+        libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM);
     }
 }
 
