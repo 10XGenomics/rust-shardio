@@ -556,7 +556,7 @@ where
                 // important note: lz4f (not lz4) is the relevant mode in those charts.
                 .build(&mut self.compress_buffer)?;
 
-            encoder.write(&self.serialize_buffer)?;
+            encoder.write_all(&self.serialize_buffer)?;
             let (_, result) = encoder.finish();
             result?;
         }
