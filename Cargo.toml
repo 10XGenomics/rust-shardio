@@ -33,7 +33,7 @@ fxhash = "0.2.1"
 lazy_static = "1.2"
 pretty_assertions = "0.5.1"
 quickcheck = "0.9"
-rand = "^0.7"
+rand = "^0.8"
 is_sorted = "0.1"
 
 [[bench]]
