@@ -212,11 +212,13 @@ where
     /// Create a writer for storing data items of type `T`.
     /// # Arguments
     /// * `path` - Path to newly created output file
-    /// * `sender_buffer_size` - number of items to buffer on the sending thread before transferring data to the writer
-    /// * `disk_chunk_size` - number of items to store in chunk on disk. Controls the tradeoff between indexing overhead and the granularity
-    ///                       can be read at.
-    /// * `item_buffer_size` - number of items to buffer before writing data to disk. More buffering causes the data for a given interval to be
-    ///                        spread over fewer disk chunks, but requires more memory.
+    /// * `sender_buffer_size` - number of items to buffer on the sending thread before transferring data to the writer.
+    ///                          Each transfer to the writer requires one channel send, and one allocation.
+    ///                          Set to ~16 or 32 it you're sending items very rapidly (>100k/s).
+    /// * `disk_chunk_size` - Number of items to store in each chunk on disk. Controls the tradeoff between indexing overhead and the granularity
+    ///                       of reads into the sorted dataset. When reading, shardio must iterate from the start of a chunk to access an item.
+    /// * `item_buffer_size` - Number of items to buffer before sorting, chunking and writing items to disk. More buffering causes each chunk
+    ///                        to cover a smaller interval of key space (allowing for more efficient reading), but requires more memory.
     pub fn new<P: AsRef<Path>>(
         path: P,
         sender_buffer_size: usize,
