@@ -47,7 +47,7 @@
 //!     // Open finished file & test chunked reads
 //!     let reader = ShardReader::<DataStruct>::open(filename)?;
 //!
-//!     
+//!
 //!     let mut all_items = Vec::new();
 //!
 //!     // Shardio will divide the key space into 5 roughly equally sized chunks.
@@ -859,7 +859,7 @@ fn advise_will_need(file: &File, offset: usize, len: usize) {
     #[cfg(target_os = "linux")]
     unsafe {
         use std::os::unix::io::AsRawFd;
-        libc::posix_fadvise(file.as_raw_fd(), offset, len, libc::POSIX_FADV_WILLNEED);
+        libc::posix_fadvise(file.as_raw_fd(), offset as i64, len as i64, libc::POSIX_FADV_WILLNEED);
     }
 }
 
