@@ -78,6 +78,8 @@ use std::any::type_name;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs::File;
+use std::io::BufReader;
+use std::io::Read;
 use std::io::{self, Seek, SeekFrom};
 use std::marker::PhantomData;
 use std::ops::DerefMut;
@@ -85,8 +87,6 @@ use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::thread;
-use std::io::BufReader;
-use std::io::Read;
 
 use bincode::{deserialize_from, serialize_into};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -826,10 +826,7 @@ where
     }
 
     /// Warn the OS that will be accessing a shard soon -- hope for a prefetch
-    fn fadivse_shard(
-        &self,
-        rec: &ShardRecord<<S as SortKey<T>>::Key>,
-    ) {
+    fn fadivse_shard(&self, rec: &ShardRecord<<S as SortKey<T>>::Key>) {
         advise_will_need(&self.file, rec.offset, rec.len_bytes)
     }
 
@@ -859,7 +856,12 @@ fn advise_will_need(file: &File, offset: usize, len: usize) {
     #[cfg(target_os = "linux")]
     unsafe {
         use std::os::unix::io::AsRawFd;
-        libc::posix_fadvise(file.as_raw_fd(), offset as i64, len as i64, libc::POSIX_FADV_WILLNEED);
+        libc::posix_fadvise(
+            file.as_raw_fd(),
+            offset as i64,
+            len as i64,
+            libc::POSIX_FADV_WILLNEED,
+        );
     }
 }
 
@@ -881,7 +883,6 @@ struct ReadAdapter<'a> {
 
 impl<'a> ReadAdapter<'a> {
     fn new(file: &'a File, offset: usize, len: usize) -> Self {
-
         advise_will_need(file, offset, len);
 
         ReadAdapter {
