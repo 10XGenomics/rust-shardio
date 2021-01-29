@@ -85,6 +85,8 @@ use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::thread;
+use std::io::BufReader;
+use std::io::Read;
 
 use bincode::{deserialize_from, serialize_into};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -823,6 +825,14 @@ where
         ShardIter::new(self, rec.clone())
     }
 
+    /// Warn the OS that will be accessing a shard soon -- hope for a prefetch
+    fn fadivse_shard(
+        &self,
+        rec: &ShardRecord<<S as SortKey<T>>::Key>,
+    ) {
+        advise_will_need(&self.file, rec.offset, rec.len_bytes)
+    }
+
     /// Total number of values held by this reader
     pub fn len(&self) -> usize {
         self.index.iter().map(|x| x.len_items).sum()
@@ -843,28 +853,6 @@ where
     }
 }
 
-use std::io::BufReader;
-use std::io::Read;
-
-struct ReadAdapter<'a> {
-    file: &'a File,
-    offset: usize,
-    bytes_remaining: usize,
-}
-
-impl<'a> ReadAdapter<'a> {
-    fn new(file: &'a File, offset: usize, len: usize) -> Self {
-
-        advise_will_need(file, offset, len);
-
-        ReadAdapter {
-            file,
-            offset,
-            bytes_remaining: len,
-        }
-    }
-}
-
 /// Instruct kernel that we will read a given part of the file soon. Only works on Linux.
 #[allow(unused_variables)]
 fn advise_will_need(file: &File, offset: usize, len: usize) {
@@ -882,6 +870,25 @@ fn advise_file_random(file: &File) {
     unsafe {
         use std::os::unix::io::AsRawFd;
         libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM);
+    }
+}
+
+struct ReadAdapter<'a> {
+    file: &'a File,
+    offset: usize,
+    bytes_remaining: usize,
+}
+
+impl<'a> ReadAdapter<'a> {
+    fn new(file: &'a File, offset: usize, len: usize) -> Self {
+
+        advise_will_need(file, offset, len);
+
+        ReadAdapter {
+            file,
+            offset,
+            bytes_remaining: len,
+        }
     }
 }
 
@@ -1069,7 +1076,15 @@ where
             self.active_queue.push(iter);
         }
         self.warn_active_shards();
+        self.fadvise_next_shard();
         Ok(())
+    }
+
+    /// Warm up the next shard we'll need
+    fn fadvise_next_shard(&self) {
+        if let Some(s) = self.waiting_queue.peek_min() {
+            self.reader.fadivse_shard(s);
+        }
     }
 
     /// Get the next item to return among active chunks
