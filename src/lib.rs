@@ -96,6 +96,9 @@ use lz4;
 use min_max_heap::MinMaxHeap;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+#[cfg(target_os = "linux")]
+use std::os::unix::io::AsRawFd;
+
 /// Represent a range of key space
 pub mod range;
 
@@ -463,6 +466,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
 trait BufHandler<T> {
     fn prepare_buf(v: &mut Vec<T>);
     fn process_buf(&mut self, v: &mut Vec<T>) -> Result<(), Error>;
+    fn on_chunk_done(&mut self) {}
 }
 
 struct SortAndWriteHandler<T, S>
@@ -473,6 +477,8 @@ where
 {
     // Current start position of next chunk
     cursor: usize,
+    // position of last DONTNEED fadvise
+    fadvise_cursor: usize,
     // Record of chunks written
     regions: Vec<ShardRecord<<S as SortKey<T>>::Key>>,
     // File handle
@@ -500,9 +506,30 @@ where
         // Write out the buffer chunks
         for c in buf.chunks(self.chunk_size) {
             self.write_chunk(c)?;
+            self.on_chunk_done();
         }
 
         Ok(())
+    }
+
+    /// fadvise that we don't need that data anymore
+    /// fdatassync is required
+    /// https://insights.oetiker.ch/linux/fadvise.html
+    /// fadvise only works on linux, so don't bother is
+    fn on_chunk_done(&mut self) {
+        // only do this operation every ~500MB, since the sync is likely costly
+        if self.cursor - self.fadvise_cursor < (1 << 29) {
+            return;
+        }
+
+        #[cfg(target_os = "linux")]
+        unsafe {
+            libc::fdatasync(self.file.as_raw_fd());
+        }
+
+        let len = self.cursor - self.fadvise_cursor;
+        advise_wont_need_round_page(&self.file, self.fadvise_cursor, len);
+        self.fadvise_cursor = self.cursor;
     }
 }
 
@@ -520,6 +547,7 @@ where
 
         Ok(SortAndWriteHandler {
             cursor: 4096,
+            fadvise_cursor: 4096,
             regions: Vec::new(),
             file,
             serialize_buffer: Vec::new(),
@@ -855,7 +883,6 @@ where
 fn advise_will_need(file: &File, offset: usize, len: usize) {
     #[cfg(target_os = "linux")]
     unsafe {
-        use std::os::unix::io::AsRawFd;
         libc::posix_fadvise(
             file.as_raw_fd(),
             offset as i64,
@@ -870,14 +897,37 @@ fn advise_will_need(file: &File, offset: usize, len: usize) {
 fn advise_file_random(file: &File) {
     #[cfg(target_os = "linux")]
     unsafe {
-        use std::os::unix::io::AsRawFd;
         libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM);
+    }
+}
+
+const PAGE_MASK: i64 = !((1 << 12) - 1);
+
+#[allow(unused_variables)]
+fn advise_wont_need_round_page(file: &File, offset: usize, len: usize) {
+    #[cfg(target_os = "linux")]
+    {
+        let page_offset = offset as i64 & PAGE_MASK;
+        let end = offset as i64 + len as i64;
+        let page_end = end & PAGE_MASK;
+        let page_len = page_end - page_offset;
+
+        unsafe {
+            libc::posix_fadvise(
+                file.as_raw_fd(),
+                offset as i64,
+                len as i64,
+                libc::POSIX_FADV_DONTNEED,
+            );
+        }
     }
 }
 
 struct ReadAdapter<'a> {
     file: &'a File,
+    start: usize,
     offset: usize,
+    len: usize,
     bytes_remaining: usize,
 }
 
@@ -887,7 +937,9 @@ impl<'a> ReadAdapter<'a> {
 
         ReadAdapter {
             file,
+            start: offset,
             offset,
+            len,
             bytes_remaining: len,
         }
     }
@@ -903,6 +955,13 @@ impl<'a> Read for ReadAdapter<'a> {
         self.bytes_remaining -= actual_read;
 
         Ok(actual_read)
+    }
+}
+
+/// Drop the data we read from the page cache.
+impl<'a> Drop for ReadAdapter<'a> {
+    fn drop(&mut self) {
+        advise_wont_need_round_page(self.file, self.start, self.len);
     }
 }
 
