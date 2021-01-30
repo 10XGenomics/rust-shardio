@@ -32,7 +32,7 @@ criterion = "0.3"
 fxhash = "0.2.1"
 lazy_static = "1.2"
 pretty_assertions = "0.5.1"
-quickcheck = "0.9"
+quickcheck = "1.0"
 rand = "^0.7"
 is_sorted = "0.1"
 
