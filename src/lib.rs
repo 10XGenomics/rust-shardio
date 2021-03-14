@@ -1368,6 +1368,57 @@ where
     }
 }
 
+/// Read from a collection of shardio files without considering the sort order.
+/// Useful if you just want to iterate over all the items irrespective of the
+/// ordering.
+pub struct UnsortedShardReader<T, S = DefaultSort>
+where
+    S: SortKey<T>,
+{
+    #[allow(dead_code)]
+    readers: Vec<ShardReaderSingle<T, S>>,
+}
+
+impl<T, S> UnsortedShardReader<T, S>
+where
+    T: DeserializeOwned,
+    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
+    S: SortKey<T>,
+{
+    /// Open a single shard files into reader
+    pub fn open<P: AsRef<Path>>(shard_file: P) -> Result<Self, Error> {
+        let mut readers = Vec::new();
+        let reader = ShardReaderSingle::open(shard_file)?;
+        readers.push(reader);
+
+        Ok(UnsortedShardReader { readers })
+    }
+
+    // Open a set of shard files into an aggregated reader
+    // pub fn open_set<P: AsRef<Path>>(shard_files: &[P]) -> Result<ShardReader<T, S>, Error> {
+    //     let mut readers = Vec::new();
+
+    //     for p in shard_files {
+    //         let reader = ShardReaderSingle::open(p)?;
+    //         readers.push(reader);
+    //     }
+
+    //     Ok(ShardReader { readers })
+    // }
+}
+
+impl<T, S> Iterator for UnsortedShardReader<T, S>
+where
+    T: DeserializeOwned,
+    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
+    S: SortKey<T>,
+{
+    type Item = Result<T, Error>;
+    fn next(&mut self) -> Option<Self::Item> {
+        unimplemented!()
+    }
+}
+
 #[cfg(test)]
 mod shard_tests {
     use super::*;
@@ -1822,6 +1873,12 @@ mod shard_tests {
                 }
                 assert_eq!(&true_items, &all_items_chunks);
             }
+
+            // Check the unsorted read
+            let unsorted_reader = UnsortedShardReader::<T1>::open(tmp.path())?;
+            let all_items_res: Result<Vec<_>, Error> = unsorted_reader.collect();
+            let all_items = all_items_res?;
+            set_compare(&true_items, &all_items);
         }
         Ok(())
     }
@@ -1898,6 +1955,12 @@ mod shard_tests {
                 }
 
                 set_compare(&true_items, &all_items_chunks);
+
+                // Check the unsorted read
+                let unsorted_reader = UnsortedShardReader::<T1, FieldDSort>::open(tmp.path())?;
+                let all_items_res: Result<Vec<_>, Error> = unsorted_reader.collect();
+                let all_items = all_items_res?;
+                set_compare(&true_items, &all_items);
             }
         }
 
