@@ -1385,26 +1385,22 @@ where
     <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
     S: SortKey<T>,
 {
-    /// Open a single shard files into reader
+    /// Open a single shard file
     pub fn open<P: AsRef<Path>>(shard_file: P) -> Result<Self, Error> {
+        UnsortedShardReader::open_set(&[shard_file])
+    }
+
+    /// Open a set of shard files
+    pub fn open_set<P: AsRef<Path>>(shard_files: &[P]) -> Result<Self, Error> {
         let mut readers = Vec::new();
-        let reader = ShardReaderSingle::open(shard_file)?;
-        readers.push(reader);
+
+        for p in shard_files {
+            let reader = ShardReaderSingle::open(p)?;
+            readers.push(reader);
+        }
 
         Ok(UnsortedShardReader { readers })
     }
-
-    // Open a set of shard files into an aggregated reader
-    // pub fn open_set<P: AsRef<Path>>(shard_files: &[P]) -> Result<ShardReader<T, S>, Error> {
-    //     let mut readers = Vec::new();
-
-    //     for p in shard_files {
-    //         let reader = ShardReaderSingle::open(p)?;
-    //         readers.push(reader);
-    //     }
-
-    //     Ok(ShardReader { readers })
-    // }
 }
 
 impl<T, S> Iterator for UnsortedShardReader<T, S>
