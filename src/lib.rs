@@ -1729,7 +1729,7 @@ mod shard_tests {
 
         let _all_items: Result<_, _> = reader.iter_range(&Range::all())?.collect();
         let all_items: Vec<_> = _all_items?;
-        set_compare(&true_items, &all_items);
+        assert!(set_compare(&true_items, &all_items));
 
         if !(true_items == all_items) {
             println!("true len: {:?}", true_items.len());
@@ -1783,7 +1783,7 @@ mod shard_tests {
         buffer_size: usize,
     ) -> Result<Vec<T>, Error>
     where
-        T: 'static + Serialize + DeserializeOwned + Clone + Send,
+        T: 'static + Serialize + DeserializeOwned + Clone + Send + Eq + Debug + Hash,
         S: SortKey<T>,
         <S as SortKey<T>>::Key: 'static + Send + Serialize + DeserializeOwned,
     {
@@ -1813,6 +1813,10 @@ mod shard_tests {
         for r in reader.iter()? {
             out_items.push(r?);
         }
+
+        let unsorted_items =
+            UnsortedShardReader::<T, S>::open_set(&files)?.collect::<Result<Vec<_>, _>>()?;
+        assert!(set_compare(&out_items, &unsorted_items));
 
         Ok(out_items)
     }
@@ -1940,7 +1944,7 @@ mod shard_tests {
 
             let all_items_res: Result<Vec<_>, Error> = iter.collect();
             let all_items = all_items_res?;
-            set_compare(&true_items, &all_items);
+            assert!(set_compare(&true_items, &all_items));
 
             if !(true_items == all_items) {
                 println!("true len: {:?}", true_items.len());
@@ -1978,7 +1982,7 @@ mod shard_tests {
             let unsorted_reader = UnsortedShardReader::<T1>::open(tmp.path())?;
             let all_items_res: Result<Vec<_>, Error> = unsorted_reader.collect();
             let all_items = all_items_res?;
-            set_compare(&true_items, &all_items);
+            assert!(set_compare(&true_items, &all_items));
         }
         Ok(())
     }
@@ -2022,7 +2026,7 @@ mod shard_tests {
 
             let all_items_res: Result<_, _> = reader.iter_range(&Range::all())?.collect();
             let all_items: Vec<_> = all_items_res?;
-            set_compare(&true_items, &all_items);
+            assert!(set_compare(&true_items, &all_items));
 
             // Open finished file & test chunked reads
             let set_reader = ShardReader::<T1, FieldDSort>::open(tmp.path())?;
@@ -2054,13 +2058,13 @@ mod shard_tests {
                     }
                 }
 
-                set_compare(&true_items, &all_items_chunks);
+                assert!(set_compare(&true_items, &all_items_chunks));
 
                 // Check the unsorted read
                 let unsorted_reader = UnsortedShardReader::<T1, FieldDSort>::open(tmp.path())?;
                 let all_items_res: Result<Vec<_>, Error> = unsorted_reader.collect();
                 let all_items = all_items_res?;
-                set_compare(&true_items, &all_items);
+                assert!(set_compare(&true_items, &all_items));
             }
         }
 
