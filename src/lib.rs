@@ -1413,10 +1413,6 @@ where
 
     /// Open a set of shard files
     pub fn open_set<P: AsRef<Path>>(shard_files: &[P]) -> Result<Self, Error> {
-        assert!(
-            !shard_files.is_empty(),
-            "Need at least 1 shard file to open the reader"
-        );
         let shard_files: Vec<_> = shard_files.iter().map(|f| f.as_ref().into()).collect();
 
         Ok(UnsortedShardReader {
@@ -1526,7 +1522,6 @@ where
 #[cfg(test)]
 mod shard_tests {
     use super::*;
-    use core::num::bignum::tests;
     use is_sorted::IsSorted;
     use pretty_assertions::assert_eq;
     use quickcheck::{Arbitrary, Gen, QuickCheck, StdThreadGen};
@@ -2235,5 +2230,12 @@ mod shard_tests {
         }
         tmp.close()?;
         Ok(())
+    }
+
+    #[test]
+    fn test_empty_open_set() {
+        let shard_files = Vec::<PathBuf>::new();
+        let reader = UnsortedShardReader::<u8>::open_set(&shard_files).unwrap();
+        assert_eq!(reader.count(), 0);
     }
 }
