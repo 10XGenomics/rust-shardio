@@ -4,6 +4,10 @@
 //! Data is written to sorted chunks. When reading shardio will merge the data on the fly into a single sorted view. You can
 //! also procss disjoint subsets of sorted data.
 //!
+//! Additionally, you can also iterate through the data in the order they are written to disk. The items will not
+//! in general follow the sort order. Such an iterator does not involve the merge sort step and hence does not
+//! have the memory overhead associated with keeping multiple items in memory to perform the merge sort.
+//!
 //! ```rust
 //! use serde::{Deserialize, Serialize};
 //! use shardio::*;
@@ -67,6 +71,12 @@
 //!     let mut all_items_sorted = all_items.clone();
 //!     all_items.sort();
 //!     assert_eq!(all_items, all_items_sorted);
+//!
+//!     // If you want to iterate through the items in unsorted order.
+//!     let unsorted_items: Vec<_> = UnsortedShardReader::<DataStruct>::open(filename)?.collect();
+//!     // You will get the items in the order they are written to disk.
+//!     assert_eq!(unsorted_items.len(), all_items.len());
+//!
 //!     std::fs::remove_file(filename)?;
 //!     Ok(())
 //! }
@@ -1379,9 +1389,11 @@ struct KeylessShardRecord {
     len_items: usize,
 }
 
-/// Read from a collection of shardio files without considering the sort order.
-/// Useful if you just want to iterate over all the items irrespective of the
-/// ordering.
+/// Read from a collection of shardio files in the order in which items are written without
+/// considering the sort order.
+///
+/// Useful if you just want to iterate over all the items irrespective of the ordering.
+///
 #[allow(dead_code)]
 pub struct UnsortedShardReader<T, S = DefaultSort>
 where
