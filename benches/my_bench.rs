@@ -65,6 +65,7 @@ fn main() {
         producer_chunk_size: usize,
         buffer_size: usize,
         n_items: usize,
+        unsorted_read: bool,
     ) -> Result<(), Error> {
         let tmp = tempfile::NamedTempFile::new()?;
 
@@ -101,12 +102,17 @@ fn main() {
         };
 
         // Open finished file
-        let reader = ShardReader::<T1>::open(tmp.path())?;
+        let all_items = if unsorted_read {
+            UnsortedShardReader::<T1>::open(tmp.path())?.collect::<Result<_, _>>()?
+        } else {
+            let reader = ShardReader::<T1>::open(tmp.path())?;
 
-        let mut all_items: Vec<T1> = vec![];
-        for r in reader.iter()? {
-            all_items.push(r?);
-        }
+            let mut items: Vec<T1> = vec![];
+            for r in reader.iter()? {
+                items.push(r?);
+            }
+            items
+        };
 
         if !(true_items.len() == all_items.len()) {
             println!("true len: {:?}", true_items.len());
@@ -117,12 +123,12 @@ fn main() {
         Ok(())
     }
 
-    fn test_shard_round_trip_big() {
-        check_round_trip(2048, 32, 1 << 13, 1 << 17);
+    fn test_shard_round_trip_big(unsorted_read: bool) {
+        check_round_trip(2048, 32, 1 << 13, 1 << 18, unsorted_read).unwrap();
     }
 
     fn benchmark_roundtrip(c: &mut Criterion) {
-        c.bench_function("rt", |b| b.iter(|| test_shard_round_trip_big()));
+        c.bench_function("rt", |b| b.iter(|| test_shard_round_trip_big(false)));
     }
 
     fn getf() -> impl Write {
@@ -178,7 +184,13 @@ fn main() {
         .sample_size(10)
         .noise_threshold(0.1);
 
-    crit.bench_function("round-trip", |b| b.iter(|| test_shard_round_trip_big()));
+    crit.bench_function("round-trip", |b| {
+        b.iter(|| test_shard_round_trip_big(false))
+    });
+
+    crit.bench_function("round-trip-unsorted", |b| {
+        b.iter(|| test_shard_round_trip_big(true))
+    });
 
     /*
     crit.bench_function_over_inputs(
