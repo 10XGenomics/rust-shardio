@@ -893,7 +893,7 @@ where
     S: SortKey<T>,
 {
     next_item: Option<(T, S::Key)>,
-    decoder: lz4::Decoder<BufReader<ReadAdapter<&'a File, File>>>,
+    decoder: BufReader<lz4::Decoder<ReadAdapter<&'a File, File>>>,
     items_remaining: usize,
     phantom_s: PhantomData<S>,
 }
@@ -909,16 +909,15 @@ where
         rec: ShardRecord<<S as SortKey<T>>::Key>,
     ) -> Result<Self, Error> {
         let adp_reader = ReadAdapter::new(&reader.file, rec.offset, rec.len_bytes);
-        let buf_reader = BufReader::new(adp_reader);
-        let mut lz4_reader = lz4::Decoder::new(buf_reader)?;
-
-        let first_item: T = deserialize_from(&mut lz4_reader)?;
+        let lz4_reader = lz4::Decoder::new(adp_reader)?;
+        let mut buf_reader = BufReader::new(lz4_reader);
+        let first_item: T = deserialize_from(&mut buf_reader)?;
         let first_key = S::sort_key(&first_item).into_owned();
         let items_remaining = rec.len_items - 1;
 
         Ok(ShardIter {
             next_item: Some((first_item, first_key)),
-            decoder: lz4_reader,
+            decoder: buf_reader,
             items_remaining,
             phantom_s: PhantomData,
         })
