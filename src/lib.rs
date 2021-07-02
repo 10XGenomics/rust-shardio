@@ -417,6 +417,8 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
                 BufStates::FillAndBusy(f) => (BufStates::BothBusy, Some(f)),
                 // if both buffers are busy, we yield and try again.
                 BufStates::BothBusy => {
+                    // don't leave a BufStates::Dummy in circulation.
+                    *buffer_state.deref_mut() = BufStates::BothBusy;
                     thread::yield_now();
                     continue;
                 }
