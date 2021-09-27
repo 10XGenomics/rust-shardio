@@ -12,7 +12,7 @@
 //! use serde::{Deserialize, Serialize};
 //! use shardio::*;
 //! use std::fs::File;
-//! use failure::Error;
+//! use anyhow::Error;
 //!
 //! #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, PartialOrd, Ord, Debug)]
 //! struct DataStruct {
@@ -96,9 +96,9 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::thread;
 use std::{any::type_name, path::PathBuf};
 
+use anyhow::{format_err, Error};
 use bincode::{deserialize_from, serialize_into};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use failure::{format_err, Error};
 use log::warn;
 use lz4;
 use min_max_heap::MinMaxHeap;

@@ -10,8 +10,8 @@ use std::io::BufWriter;
 use std::io::Write;
 use std::time::Duration;
 
+use anyhow::Error;
 use criterion::Criterion;
-use failure::Error;
 use serde::{Deserialize, Serialize};
 use shardio::*;
 
