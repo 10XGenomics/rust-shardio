@@ -9,6 +9,7 @@ documentation = "https://10xgenomics.github.io/rust-shardio"
 repository = "https://github.com/10XGenomics/rust-shardio"
 keywords = ["serde", "serialization", "map-reduce", "out-of-memory"]
 readme = "README.md"
+include = ["src/**/*", "LICENSE", "README.md"]
 
 [features]
 # Switch on the 'full-test' feature (in release mode), to enable 
