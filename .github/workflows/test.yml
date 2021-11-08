@@ -14,8 +14,29 @@ jobs:
     steps:
       - name: Checkout Git repository
         uses: actions/checkout@master
+      - uses: actions-rs/toolchain@v1
+        with:
+            toolchain: 1.55.0
+            default: true
+            components: rustfmt, clippy
       - name: Check Rust formatting
         run: cargo fmt -- --check
+      - name: lint with clippy
+        uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: |
+            --all-targets --
+            -W clippy::wildcard_imports
+            -W clippy::redundant_closure_for_method_calls
+            -W clippy::enum_glob_use
+            -A clippy::float_cmp
+            -D clippy::unused_io_amount
+            -W future_incompatible
+            -W nonstandard_style
+            -W rust_2018_compatibility
+            -W rust_2021_compatibility
+            -W unused
       - name: Build
         run: cargo build --release
       - name: Unit tests
