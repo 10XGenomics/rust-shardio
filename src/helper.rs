@@ -121,7 +121,7 @@ impl<T: Send + Write> Drop for ThreadProxyWriter<T> {
     fn drop(&mut self) {
         let _ = self.flush();
         let _ = self.tx.send(None);
-        self.thread_handle.take().map(|th| th.join());
+        self.thread_handle.take().map(std::thread::JoinHandle::join);
     }
 }
 

@@ -82,7 +82,7 @@ impl<K: Ord + Clone> Range<K> {
     #[inline]
     fn shard_le(inclusive_start: &Option<K>, inclusive_end: &K) -> bool {
         match (inclusive_start, inclusive_end) {
-            (&Some(ref v1), ref v2) => v1 <= v2,
+            (&Some(ref v1), v2) => v1 <= v2,
             (&None, _) => true,
         }
     }
@@ -90,7 +90,7 @@ impl<K: Ord + Clone> Range<K> {
     pub(crate) fn cmp(&self, point: &K) -> Rorder {
         if self.contains(point) {
             Rorder::Intersects
-        } else if self.start.as_ref().map_or(false, |ref s| point < &s) {
+        } else if self.start.as_ref().map_or(false, |s| point < s) {
             Rorder::Before
         } else {
             Rorder::After
@@ -117,22 +117,22 @@ mod range_tests {
     fn test_range() {
         let r1 = Range::starts_at(10);
         let r2 = Range::ends_at(10);
-        assert_eq!(r1.intersects(&r2), false);
-        assert_eq!(r2.intersects(&r1), false);
+        assert!(!r1.intersects(&r2));
+        assert!(!r2.intersects(&r1));
 
         let r3 = Range::new(5, 10);
-        assert_eq!(r1.intersects(&r3), false);
-        assert_eq!(r3.intersects(&r1), false);
+        assert!(!r1.intersects(&r3));
+        assert!(!r3.intersects(&r1));
 
         let r4 = Range::new(10, 15);
-        assert_eq!(r2.intersects(&r4), false);
-        assert_eq!(r4.intersects(&r2), false);
+        assert!(!r2.intersects(&r4));
+        assert!(!r4.intersects(&r2));
 
-        assert_eq!(r3.intersects(&r4), false);
-        assert_eq!(r4.intersects(&r3), false);
+        assert!(!r3.intersects(&r4));
+        assert!(!r4.intersects(&r3));
 
-        assert_eq!(r2.intersects(&r3), true);
-        assert_eq!(r3.intersects(&r2), true);
+        assert!(r2.intersects(&r3));
+        assert!(r3.intersects(&r2));
     }
 
     #[test]
@@ -151,28 +151,28 @@ mod range_tests {
             end_key: 5,
             ..def
         };
-        assert_eq!(r1.intersects_shard(&s1), true);
+        assert!(r1.intersects_shard(&s1));
 
         let s2 = ShardRecord {
             start_key: 0,
             end_key: 4,
             ..def
         };
-        assert_eq!(r1.intersects_shard(&s2), false);
+        assert!(!r1.intersects_shard(&s2));
 
         let s3 = ShardRecord {
             start_key: 10,
             end_key: 12,
             ..def
         };
-        assert_eq!(r1.intersects_shard(&s3), false);
+        assert!(!r1.intersects_shard(&s3));
 
         let s4 = ShardRecord {
             start_key: 9,
             end_key: 12,
             ..def
         };
-        assert_eq!(r1.intersects_shard(&s4), true);
+        assert!(r1.intersects_shard(&s4));
     }
 
     #[test]
