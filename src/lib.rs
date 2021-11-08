@@ -100,7 +100,6 @@ use anyhow::{format_err, Error};
 use bincode::{deserialize_from, serialize_into};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use log::warn;
-use lz4;
 use min_max_heap::MinMaxHeap;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -263,7 +262,7 @@ where
                     if !std::thread::panicking() {
                         panic!("ShardSenders are still active. They must all be out of scope or finished() before ShardWriter is closed");
                     } else {
-                        return Ok(0);
+                        Ok(0)
                     }
                 }
             }
@@ -319,8 +318,8 @@ enum BufAddOutcome<T> {
     Process(Vec<T>),
 }
 
-use BufAddOutcome::*;
-use BufStates::*;
+use BufAddOutcome::{Done, Process, Retry};
+use BufStates::{BothBusy, Dummy, FillAndBusy, FillAndWait};
 
 use std::fmt;
 
@@ -352,7 +351,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
             // determine new state and any follow-up work
             let (mut new_state, outcome) = match current_state {
                 FillAndWait(mut f, w) => {
-                    f.extend(items.drain(..));
+                    f.append(items);
                     if f.len() + self.sender_buffer_size >= f.capacity() {
                         (FillAndBusy(w), Process(f))
                     } else {
@@ -360,7 +359,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
                     }
                 }
                 FillAndBusy(mut f) => {
-                    f.extend(items.drain(..));
+                    f.append(items);
                     if f.len() + self.sender_buffer_size >= f.capacity() {
                         (BothBusy, Process(f))
                     } else {
@@ -550,7 +549,7 @@ where
         self.serialize_buffer.clear();
         self.compress_buffer.clear();
 
-        assert!(items.len() > 0);
+        assert!(!items.is_empty());
 
         let bounds = (
             S::sort_key(&items[0]).into_owned(),
@@ -609,7 +608,7 @@ where
         self.file.seek(SeekFrom::Start(
             (index_block_position + index_block_size) as u64,
         ))?;
-        self.file.write_u64::<BigEndian>(0 as u64)?;
+        self.file.write_u64::<BigEndian>(0_u64)?;
         self.file
             .write_u64::<BigEndian>(index_block_position as u64)?;
         self.file.write_u64::<BigEndian>(index_block_size as u64)?;
@@ -653,7 +652,7 @@ where
             buffer_state: Mutex::new(bufs),
             handler: Mutex::new(handler),
             closed: AtomicBool::new(false),
-            sender_buffer_size: sender_buffer_size,
+            sender_buffer_size,
         };
 
         Ok(ShardWriterInner {
@@ -728,7 +727,7 @@ where
     pub fn finished(&mut self) -> Result<(), Error> {
         // send any remaining items and drop the Arc<ShardWriterInner>
         if let Some(inner) = self.writer.take() {
-            if self.buffer.len() > 0 {
+            if !self.buffer.is_empty() {
                 inner.send_items(&mut self.buffer)?;
             }
         }
@@ -776,6 +775,8 @@ where
     p1: PhantomData<T>,
 }
 
+type ShardRecordVec<T, S> = Vec<ShardRecord<<S as SortKey<T>>::Key>>;
+
 impl<T, S> ShardReaderSingle<T, S>
 where
     T: DeserializeOwned,
@@ -797,9 +798,7 @@ where
     }
 
     /// Read shard index
-    fn read_index_block(
-        mut file: File,
-    ) -> Result<(Vec<ShardRecord<<S as SortKey<T>>::Key>>, File), Error> {
+    fn read_index_block(mut file: File) -> Result<(ShardRecordVec<T, S>, File), Error> {
         let _ = file.seek(SeekFrom::End(-24))?;
         let _num_shards = file.read_u64::<BigEndian>()? as usize;
         let index_block_position = file.read_u64::<BigEndian>()?;
@@ -825,7 +824,7 @@ where
         &self,
         range: &Range<<S as SortKey<T>>::Key>,
     ) -> Result<RangeIter<'_, T, S>, Error> {
-        RangeIter::new(&self, range.clone())
+        RangeIter::new(self, range.clone())
     }
 
     /// Return an iterator over the items in one disk shard (corresponding to one index entry)
@@ -839,6 +838,11 @@ where
     /// Total number of values held by this reader
     pub fn len(&self) -> usize {
         self.index.iter().map(|x| x.len_items).sum()
+    }
+
+    // Returns true if there are no values held by this reader.
+    pub fn is_empty(&self) -> bool {
+        self.index.iter().all(|x| x.len_items == 0)
     }
 
     /// Estimate an upper bound on the total number of values held by a range
@@ -976,7 +980,7 @@ where
     <S as SortKey<T>>::Key: Ord + Clone,
 {
     fn partial_cmp(&self, other: &ShardIter<'a, T, S>) -> Option<Ordering> {
-        Some(self.cmp(&other))
+        Some(self.cmp(other))
     }
 }
 
@@ -1027,7 +1031,7 @@ where
         let mut waiting_queue = MinMaxHeap::new();
 
         for s in shards {
-            if Some(&s.start_key) == min_item && active_queue.len() == 0 {
+            if Some(&s.start_key) == min_item && active_queue.is_empty() {
                 active_queue.push(reader.iter_shard(s)?);
             } else {
                 waiting_queue.push(s);
@@ -1049,14 +1053,14 @@ where
     /// What key is next among the active set
     fn peek_active_next(&self) -> Option<&<S as SortKey<T>>::Key> {
         let n = self.active_queue.peek_min();
-        n.map(|v| v.current_key())
+        n.map(ShardIter::current_key)
     }
 
     /// Restore all the shards that start at or before this item, or the next usable shard
     fn activate_shards(&mut self) -> Result<(), Error> {
         while self.waiting_queue.peek_min().map_or(false, |shard| {
             Some(&shard.start_key) < self.peek_active_next()
-        }) || (self.peek_active_next().is_none() && self.waiting_queue.len() > 0)
+        }) || (self.peek_active_next().is_none() && !self.waiting_queue.is_empty())
         {
             let shard = self.waiting_queue.pop_min().unwrap();
             let iter = self.reader.iter_shard(shard)?;
@@ -1071,9 +1075,8 @@ where
         self.active_queue.pop_min().map(|vec| {
             let (item, new_vec) = vec.pop()?;
 
-            match new_vec {
-                Some(v) => self.active_queue.push(v),
-                _ => (),
+            if let Some(v) = new_vec {
+                self.active_queue.push(v);
             }
             Ok(item)
         })
@@ -1115,8 +1118,8 @@ where
     fn next(&mut self) -> Option<Result<T, Error>> {
         loop {
             let a = self.activate_shards();
-            if a.is_err() {
-                return Some(Err(a.unwrap_err()));
+            if let Err(a) = a {
+                return Some(Err(a));
             }
 
             match self.next_active() {
@@ -1169,7 +1172,7 @@ where
     K: Ord + Clone,
 {
     fn eq(&self, other: &SortableItem<K, T>) -> bool {
-        &self.key == &other.key
+        self.key == other.key
     }
 }
 
@@ -1199,11 +1202,11 @@ where
             let item = itr.next().transpose()?;
 
             // If we have a next item, add it's key to the heap
-            item.map(|ii| {
+            if let Some(ii) = item {
                 let key = S::sort_key(&ii).into_owned();
                 let sortable_item = SortableItem::new(key, ii);
                 merge_heap.push((sortable_item, idx));
-            });
+            }
         }
 
         Ok(MergeIterator {
@@ -1232,13 +1235,10 @@ where
             let next = self.iterators[i].next().transpose()?;
 
             // Push the next-next key onto the heap
-            match next {
-                Some(next_item) => {
-                    let key = S::sort_key(&next_item).into_owned();
-                    self.merge_heap.push((SortableItem::new(key, next_item), i));
-                }
-                _ => (),
-            };
+            if let Some(next_item) = next {
+                let key = S::sort_key(&next_item).into_owned();
+                self.merge_heap.push((SortableItem::new(key, next_item), i));
+            }
 
             Ok(item.item)
         })
@@ -1310,13 +1310,18 @@ where
     }
 
     /// Iterate over all items
-    pub fn iter<'a>(&'a self) -> Result<MergeIterator<'a, T, S>, Error> {
+    pub fn iter(&self) -> Result<MergeIterator<T, S>, Error> {
         self.iter_range(&Range::all())
     }
 
     /// Total number of items
     pub fn len(&self) -> usize {
-        self.readers.iter().map(|r| r.len()).sum()
+        self.readers.iter().map(ShardReaderSingle::len).sum()
+    }
+
+    /// Returns true if there are no items in the reader.
+    pub fn is_empty(&self) -> bool {
+        self.readers.iter().all(ShardReaderSingle::is_empty)
     }
 
     /// Generate `num_chunks` ranges covering the give `range`, each with a roughly equal numbers of elements.
@@ -1342,7 +1347,7 @@ where
         // Divide the known start locations into chunks, and
         // use setup start positions.
         let chunk_starts = if starts.len() <= num_chunks {
-            starts.into_iter().map(|x| Some(x)).collect::<Vec<_>>()
+            starts.into_iter().map(Some).collect::<Vec<_>>()
         } else {
             let n = starts.len();
             (0..num_chunks)
@@ -1546,7 +1551,6 @@ mod shard_tests {
     use std::hash::Hash;
     use std::iter::{repeat, FromIterator};
     use std::u8;
-    use tempfile;
 
     #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord, Hash)]
     struct T1 {
@@ -1640,14 +1644,14 @@ mod shard_tests {
 
         let _ = tmp.as_file().write_all_at(&buf, 0).unwrap();
 
-        for i in 0..n {
-            buf[i] = 0;
+        for v in buf.iter_mut().take(n) {
+            *v = 0;
         }
 
         let _ = tmp.as_file().read_exact_at(&mut buf, 0).unwrap();
 
-        for i in 0..n {
-            assert_eq!(buf[i], (i % 254) as u8)
+        for (i, v) in buf.iter().enumerate().take(n) {
+            assert_eq!(*v, (i % 254) as u8)
         }
     }
 
@@ -1745,7 +1749,7 @@ mod shard_tests {
         let all_items: Vec<_> = _all_items?;
         assert!(set_compare(&true_items, &all_items));
 
-        if !(true_items == all_items) {
+        if true_items != all_items {
             println!("true len: {:?}", true_items.len());
             println!("round trip len: {:?}", all_items.len());
             assert_eq!(&true_items, &all_items);
@@ -1961,7 +1965,7 @@ mod shard_tests {
             let all_items = all_items_res?;
             assert!(set_compare(&true_items, &all_items));
 
-            if !(true_items == all_items) {
+            if true_items != all_items {
                 println!("true len: {:?}", true_items.len());
                 println!("round trip len: {:?}", all_items.len());
                 assert_eq!(&true_items, &all_items);
@@ -2088,12 +2092,12 @@ mod shard_tests {
         Ok(())
     }
 
-    fn set_compare<T: Eq + Debug + Clone + Hash>(s1: &Vec<T>, s2: &Vec<T>) -> bool {
+    fn set_compare<T: Eq + Debug + Clone + Hash>(s1: &[T], s2: &[T]) -> bool {
         let s1: HashSet<T> = HashSet::from_iter(s1.iter().cloned());
         let s2: HashSet<T> = HashSet::from_iter(s2.iter().cloned());
 
         if s1 == s2 {
-            return true;
+            true
         } else {
             let s1_minus_s2 = s1.difference(&s2);
             println!("in s1, but not s2: {:?}", s1_minus_s2);
@@ -2101,7 +2105,7 @@ mod shard_tests {
             let s2_minus_s1 = s2.difference(&s1);
             println!("in s2, but not s1: {:?}", s2_minus_s1);
 
-            return false;
+            false
         }
     }
 
