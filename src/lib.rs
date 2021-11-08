@@ -2056,6 +2056,8 @@ mod shard_tests {
                     chunks.len(),
                     *rc
                 );
+
+                // we are sorting by field D, which is u8, so we should have at most 256 chunks.
                 assert!(
                     chunks.len() <= 256,
                     "chunks > |T1.d| ({} > {})",
