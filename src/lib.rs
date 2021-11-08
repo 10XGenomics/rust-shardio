@@ -546,7 +546,7 @@ where
         // writing completes successfully.
     }
 
-    fn write_chunk(&mut self, items: &[T]) -> Result<usize, Error> {
+    fn write_chunk(&mut self, items: &[T]) -> Result<(), Error> {
         self.serialize_buffer.clear();
         self.compress_buffer.clear();
 
@@ -586,11 +586,11 @@ where
 
         self.regions.push(reg);
         self.cursor += self.compress_buffer.len();
-        let l = self
+        let _ = self
             .file
-            .write_at(&self.compress_buffer, cur_offset as u64)?;
+            .write_all_at(&self.compress_buffer, cur_offset as u64)?;
 
-        Ok(l)
+        Ok(())
     }
 
     /// Write out the shard positioning data
@@ -604,7 +604,7 @@ where
         let index_block_size = buf.len();
 
         self.file
-            .write_at(buf.as_slice(), index_block_position as u64)?;
+            .write_all_at(buf.as_slice(), index_block_position as u64)?;
 
         self.file.seek(SeekFrom::Start(
             (index_block_position + index_block_size) as u64,
@@ -882,11 +882,13 @@ impl<T: Borrow<F>, F: FileExt> Read for ReadAdapter<T, F> {
         let read_len = std::cmp::min(buf.len(), self.bytes_remaining);
 
         let buf_slice = &mut buf[0..read_len];
-        let actual_read = self.file.borrow().read_at(buf_slice, self.offset as u64)?;
-        self.offset += actual_read;
-        self.bytes_remaining -= actual_read;
+        self.file
+            .borrow()
+            .read_exact_at(buf_slice, self.offset as u64)?;
+        self.offset += read_len;
+        self.bytes_remaining -= read_len;
 
-        Ok(actual_read)
+        Ok(read_len)
     }
 }
 
@@ -1625,7 +1627,7 @@ mod shard_tests {
 
     // Some tests are configured to only run with the "full-test" feature enabled.
     // They are too slow to run in debug mode, so you should use release mode.
-    #[cfg(feature = "full-test")]
+    //#[cfg(feature = "full-test")]
     #[test]
     fn test_read_write_at() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -1636,15 +1638,13 @@ mod shard_tests {
             buf.push((i % 254) as u8);
         }
 
-        let written = tmp.as_file().write_at(&buf, 0).unwrap();
-        assert_eq!(n, written);
+        let _ = tmp.as_file().write_all_at(&buf, 0).unwrap();
 
         for i in 0..n {
             buf[i] = 0;
         }
 
-        let read = tmp.as_file().read_at(&mut buf, 0).unwrap();
-        assert_eq!(n, read);
+        let _ = tmp.as_file().read_exact_at(&mut buf, 0).unwrap();
 
         for i in 0..n {
             assert_eq!(buf[i], (i % 254) as u8)
