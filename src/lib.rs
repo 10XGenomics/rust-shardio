@@ -1538,7 +1538,7 @@ mod shard_tests {
     use super::*;
     use is_sorted::IsSorted;
     use pretty_assertions::assert_eq;
-    use quickcheck::{Arbitrary, Gen, QuickCheck, StdThreadGen};
+    use quickcheck::{Arbitrary, Gen, QuickCheck};
     use std::collections::HashSet;
     use std::fmt::Debug;
     use std::hash::Hash;
@@ -1555,7 +1555,7 @@ mod shard_tests {
     }
 
     impl Arbitrary for T1 {
-        fn arbitrary<G: Gen>(g: &mut G) -> T1 {
+        fn arbitrary(g: &mut Gen) -> T1 {
             T1 {
                 a: u64::arbitrary(g),
                 b: u32::arbitrary(g),
@@ -1566,7 +1566,7 @@ mod shard_tests {
     }
 
     impl T1 {
-        fn non_rand_key<G: Gen>(g: &mut G) -> T1 {
+        fn non_rand_key(g: &mut Gen) -> T1 {
             if bool::arbitrary(g) {
                 if bool::arbitrary(g) {
                     T1 {
@@ -1601,7 +1601,7 @@ mod shard_tests {
         }
     }
 
-    fn rand_items(n: usize, g: &mut impl Gen) -> Vec<T1> {
+    fn rand_items(n: usize, g: &mut Gen) -> Vec<T1> {
         let mut items = Vec::new();
         for _ in 0..n {
             let tt = if bool::arbitrary(g) {
@@ -1615,7 +1615,7 @@ mod shard_tests {
         items
     }
 
-    fn rand_item_chunks(n_chunks: usize, items_per_chunk: usize, g: &mut impl Gen) -> Vec<Vec<T1>> {
+    fn rand_item_chunks(n_chunks: usize, items_per_chunk: usize, g: &mut Gen) -> Vec<Vec<T1>> {
         let mut chunks = Vec::new();
         for _ in 0..n_chunks {
             chunks.push(rand_items(items_per_chunk, g));
@@ -1721,7 +1721,7 @@ mod shard_tests {
         let true_items = {
             let manager: ShardWriter<T1> = ShardWriter::new(tmp.path(), 16, 64, 1 << 10).unwrap();
 
-            let mut g = StdThreadGen::new(10);
+            let mut g = Gen::new(10);
             let true_items = repeat(rand_items(1, &mut g)[0])
                 .take(n_items)
                 .collect::<Vec<_>>();
@@ -1776,8 +1776,8 @@ mod shard_tests {
     struct MultiSlice<T>(Vec<Vec<T>>);
 
     impl<T: Arbitrary> Arbitrary for MultiSlice<T> {
-        fn arbitrary<G: Gen>(g: &mut G) -> MultiSlice<T> {
-            let slices = (g.next_u32() % 32) as usize;
+        fn arbitrary(g: &mut Gen) -> MultiSlice<T> {
+            let slices = usize::arbitrary(g) % 32;
 
             let mut data = Vec::new();
 
@@ -1854,7 +1854,8 @@ mod shard_tests {
             IsSorted::is_sorted_by_key(&mut sorted.iter(), |x| FieldDSort::sort_key(x).into_owned())
         }
 
-        QuickCheck::with_gen(StdThreadGen::new(500000))
+        QuickCheck::new()
+            .gen(Gen::new(500000))
             .tests(4)
             .quickcheck(check_t1 as fn(MultiSlice<T1>) -> bool);
     }
@@ -1942,7 +1943,7 @@ mod shard_tests {
                 buffer_size,
             )?;
 
-            let mut g = StdThreadGen::new(10);
+            let mut g = Gen::new(10);
             let send_chunks = rand_item_chunks(4, n_items / 4, &mut g);
             let mut true_items = ThreadSender::send_from_threads(send_chunks, writer.get_sender())?;
 
@@ -2024,7 +2025,7 @@ mod shard_tests {
                 buffer_size,
             )?;
 
-            let mut g = StdThreadGen::new(10);
+            let mut g = Gen::new(10);
             let send_chunks = rand_item_chunks(4, n_items / 4, &mut g);
             let mut true_items = ThreadSender::send_from_threads(send_chunks, writer.get_sender())?;
 
@@ -2055,8 +2056,10 @@ mod shard_tests {
                     chunks.len(),
                     *rc
                 );
+
+                // we are sorting by field D, which is u8, so we should have at most 256 chunks.
                 assert!(
-                    chunks.len() <= u8::max_value() as usize,
+                    chunks.len() <= 256,
                     "chunks > |T1.d| ({} > {})",
                     chunks.len(),
                     u8::max_value()
@@ -2120,7 +2123,7 @@ mod shard_tests {
                 buffer_size,
             )?;
 
-            let mut g = StdThreadGen::new(10);
+            let mut g = Gen::new(10);
             let mut true_items = rand_items(n_items, &mut g);
 
             // Sender must be closed
