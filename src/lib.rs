@@ -785,7 +785,7 @@ where
 {
     /// Open a shard file that stores `T` items.
     fn open<P: AsRef<Path>>(path: P) -> Result<ShardReaderSingle<T, S>, Error> {
-        let f = File::open(path).unwrap();
+        let f = File::open(path)?;
 
         let (mut index, f) = Self::read_index_block(f)?;
         index.sort();
