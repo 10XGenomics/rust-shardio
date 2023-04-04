@@ -173,6 +173,15 @@ pub trait SortKey<T> {
 
     /// Compute the sort key for value `t`.
     fn sort_key(t: &T) -> Cow<'_, Self::Key>;
+
+    /// In some cases a user may wish to override the default
+    /// sorting to lazily evaluate elements of the key
+    /// DANGER:  It is entirely up to the user that 
+    /// there `cmp` function is identical to this default
+    /// implementation
+    fn cmp(t1: &T, t2: &T) -> std::cmp::Ordering {
+        Self::sort_key(t1).cmp(&Self::sort_key(t2))
+    }
 }
 
 /// Marker struct for sorting types that implement `Ord` in the order defined by their `Ord` impl.
@@ -503,7 +512,7 @@ where
 {
     /// Sort items according to `S`.
     fn prepare_buf(buf: &mut Vec<T>) {
-        buf.sort_by(|x, y| S::sort_key(x).cmp(&S::sort_key(y)));
+        buf.sort_by(|x, y| S::cmp(x, y));
     }
 
     /// Write items to disk chunks
