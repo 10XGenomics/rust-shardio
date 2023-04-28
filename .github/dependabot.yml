@@ -1,11 +1,21 @@
 version: 2
+
 updates:
-- package-ecosystem: cargo
-  directory: "/"
-  schedule:
-    interval: daily
-  open-pull-requests-limit: 10
-  ignore:
-  - dependency-name: pretty_assertions
-    versions:
-    - 0.7.1
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "build(deps): "
+    ignore:
+    - dependency-name: pretty_assertions
+      versions:
+      - 0.7.1
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci(deps): "
