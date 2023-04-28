@@ -82,7 +82,7 @@ impl<K: Ord + Clone> Range<K> {
     #[inline]
     fn shard_le(inclusive_start: &Option<K>, inclusive_end: &K) -> bool {
         match (inclusive_start, inclusive_end) {
-            (&Some(ref v1), v2) => v1 <= v2,
+            (Some(v1), v2) => v1 <= v2,
             (&None, _) => true,
         }
     }
@@ -101,7 +101,7 @@ impl<K: Ord + Clone> Range<K> {
     #[inline]
     fn se_lt(s1: &Option<K>, e2: &Option<K>) -> bool {
         match (s1, e2) {
-            (&Some(ref v1), &Some(ref v2)) => v1 < v2,
+            (Some(v1), Some(v2)) => v1 < v2,
             (&Some(_), &None) => true,
             (&None, &Some(_)) => true,
             (&None, &None) => true,

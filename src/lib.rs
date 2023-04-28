@@ -585,8 +585,7 @@ where
 
         self.regions.push(reg);
         self.cursor += self.compress_buffer.len();
-        let _ = self
-            .file
+        self.file
             .write_all_at(&self.compress_buffer, cur_offset as u64)?;
 
         Ok(())
@@ -803,7 +802,7 @@ where
         let _num_shards = file.read_u64::<BigEndian>()? as usize;
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
-        file.seek(SeekFrom::Start(index_block_position as u64))?;
+        file.seek(SeekFrom::Start(index_block_position))?;
         let (t_typ, s_typ): (String, String) = deserialize_from(&mut file)?;
         // if compiler version is the same, type misnaming is an error
         if t_typ != type_name::<T>() || s_typ != type_name::<S>() {
@@ -1642,13 +1641,13 @@ mod shard_tests {
             buf.push((i % 254) as u8);
         }
 
-        let _ = tmp.as_file().write_all_at(&buf, 0).unwrap();
+        tmp.as_file().write_all_at(&buf, 0).unwrap();
 
         for v in buf.iter_mut().take(n) {
             *v = 0;
         }
 
-        let _ = tmp.as_file().read_exact_at(&mut buf, 0).unwrap();
+        tmp.as_file().read_exact_at(&mut buf, 0).unwrap();
 
         for (i, v) in buf.iter().enumerate().take(n) {
             assert_eq!(*v, (i % 254) as u8)
@@ -1757,7 +1756,7 @@ mod shard_tests {
 
         for rc in [1, 3, 8, 15, 32, 63, 128, 255, 512, 1095].iter() {
             // Open finished file & test chunked reads
-            let set_reader = ShardReader::<T1>::open(&tmp.path())?;
+            let set_reader = ShardReader::<T1>::open(tmp.path())?;
             let mut all_items_chunks = Vec::new();
 
             // Read in chunks
@@ -1973,7 +1972,7 @@ mod shard_tests {
 
             for rc in [1, 3, 8, 15, 27].iter() {
                 // Open finished file & test chunked reads
-                let set_reader = ShardReader::<T1>::open(&tmp.path())?;
+                let set_reader = ShardReader::<T1>::open(tmp.path())?;
                 let mut all_items_chunks = Vec::new();
 
                 // Read in chunks
