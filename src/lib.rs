@@ -592,7 +592,7 @@ where
     }
 
     /// Write out the shard positioning data
-    fn write_index(&mut self) -> Result<(), Error> {
+    pub fn write_index(&mut self) -> Result<(), Error> {
         let mut buf = Vec::new();
 
         serialize_into(&mut buf, &(type_name::<T>(), type_name::<S>()))?;
