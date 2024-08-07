@@ -1549,7 +1549,6 @@ mod shard_tests {
     use std::fmt::Debug;
     use std::hash::Hash;
     use std::iter::{repeat, FromIterator};
-    use std::u8;
 
     #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord, Hash)]
     struct T1 {
@@ -2065,7 +2064,7 @@ mod shard_tests {
                     chunks.len() <= 256,
                     "chunks > |T1.d| ({} > {})",
                     chunks.len(),
-                    u8::max_value()
+                    u8::MAX
                 );
                 for c in chunks {
                     let itr = set_reader.iter_range(&c)?;
