@@ -476,7 +476,8 @@ trait BufHandler<T> {
     fn process_buf(&mut self, v: &mut Vec<T>) -> Result<(), Error>;
 }
 
-struct SortAndWriteHandler<T, S>
+/// Provide the base implementation for sorting chunks and writing shards.
+pub struct SortAndWriteHandler<T, S>
 where
     T: Send + Serialize,
     S: SortKey<T>,
@@ -523,6 +524,7 @@ where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
+    /// Create a new handler using the provided chunk size, writing to path.
     pub fn new<P: AsRef<Path>>(
         chunk_size: usize,
         path: P,
