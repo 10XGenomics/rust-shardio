@@ -476,6 +476,7 @@ trait BufHandler<T> {
     fn process_buf(&mut self, v: &mut Vec<T>) -> Result<(), Error>;
 }
 
+/// Provide the base implementation for sorting chunks and writing shards.
 pub struct SortAndWriteHandler<T, S>
 where
     T: Send + Serialize,
