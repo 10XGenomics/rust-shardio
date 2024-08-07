@@ -471,8 +471,10 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
 /// Two-part handler for a buffer needing processing.
 /// `prepare_buf` is generic and needs no state. Used for sorting.
 /// `process_buf` needs exclusive access to the handler, so can do IO.
-trait BufHandler<T> {
+pub trait BufHandler<T> {
+    /// Sort the provided buffer.
     fn prepare_buf(v: &mut Vec<T>);
+    /// Process the provided buffer.
     fn process_buf(&mut self, v: &mut Vec<T>) -> Result<(), Error>;
 }
 
