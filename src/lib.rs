@@ -476,7 +476,7 @@ trait BufHandler<T> {
     fn process_buf(&mut self, v: &mut Vec<T>) -> Result<(), Error>;
 }
 
-struct SortAndWriteHandler<T, S>
+pub struct SortAndWriteHandler<T, S>
 where
     T: Send + Serialize,
     S: SortKey<T>,
