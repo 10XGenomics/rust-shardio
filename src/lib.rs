@@ -523,6 +523,7 @@ where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
+    /// Create a new handler using the provided chunk size, writing to path.
     pub fn new<P: AsRef<Path>>(
         chunk_size: usize,
         path: P,
