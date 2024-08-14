@@ -352,7 +352,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
             let (mut new_state, outcome) = match current_state {
                 FillAndWait(mut f, w) => {
                     f.append(items);
-                    if f.len() + self.sender_buffer_size >= f.capacity() {
+                    if f.len() + self.sender_buffer_size > f.capacity() {
                         (FillAndBusy(w), Process(f))
                     } else {
                         (FillAndWait(f, w), Done)
@@ -360,7 +360,7 @@ impl<T, H: BufHandler<T>> BufferStateMachine<T, H> {
                 }
                 FillAndBusy(mut f) => {
                     f.append(items);
-                    if f.len() + self.sender_buffer_size >= f.capacity() {
+                    if f.len() + self.sender_buffer_size > f.capacity() {
                         (BothBusy, Process(f))
                     } else {
                         (FillAndBusy(f), Done)
