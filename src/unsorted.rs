@@ -32,7 +32,8 @@ where
     S: SortKey<T>,
 {
     /// Iterator over the shard files in the set, opening readers.
-    shard_reader_iter: Box<dyn Iterator<Item = Result<UnsortedShardFileReader<T, S>, Error>>>,
+    shard_reader_iter:
+        Box<dyn Iterator<Item = Result<UnsortedShardFileReader<T, S>, Error>> + Send>,
 
     /// Iterator over the current shard file.
     active_shard_reader: Option<UnsortedShardFileReader<T, S>>,
