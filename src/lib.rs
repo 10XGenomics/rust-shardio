@@ -1853,10 +1853,20 @@ mod shard_tests {
             }
 
             // Check the unsorted read
+            assert_eq!(n_items, UnsortedShardReader::<T1>::len(&[tmp.path()])?);
             let unsorted_reader = UnsortedShardReader::<T1>::open(tmp.path());
             let all_items_res: Result<Vec<_>, Error> = unsorted_reader.collect();
             let all_items = all_items_res?;
             assert!(set_compare(&true_items, &all_items));
+
+            // Check that the skip_lazy feature produces the expected results.
+            let mut unsorted_reader_skip = UnsortedShardReader::<T1>::open(tmp.path());
+            let to_skip = (disk_chunk_size * 3) + 1;
+            let skipped = unsorted_reader_skip.skip_lazy(to_skip)?;
+            assert_eq!(to_skip, skipped);
+            let all_items_res_skip: Result<Vec<_>, Error> = unsorted_reader_skip.collect();
+            let all_items_skip = all_items_res_skip?;
+            assert_eq!(&all_items[to_skip..], &all_items_skip);
         }
         Ok(())
     }
@@ -2116,6 +2126,12 @@ mod shard_tests {
     fn test_empty_open_set() {
         let shard_files = Vec::<PathBuf>::new();
         let reader = UnsortedShardReader::<u8>::open_set(&shard_files);
+        assert_eq!(reader.count(), 0);
+
+        // Test that skipping an empty set works correctly.
+        let mut reader = UnsortedShardReader::<u8>::open_set(&shard_files);
+        let skipped = reader.skip_lazy(10).unwrap();
+        assert_eq!(0, skipped);
         assert_eq!(reader.count(), 0);
     }
 }

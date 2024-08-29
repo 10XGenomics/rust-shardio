@@ -69,13 +69,28 @@ where
         }
     }
 
+    /// Compute the total number of elements in this set of shard files.
+    pub fn len<P: AsRef<Path>>(shard_files: &[P]) -> Result<usize, Error>
+    where
+        <S as SortKey<T>>::Key: 'static,
+    {
+        // Create a set reader, and consume all the files, just getting counts.
+        let files_reader = Self::open_set(shard_files);
+        let mut count = 0;
+        for file in files_reader.shard_reader_iter {
+            let file = file?;
+            count += file.len();
+        }
+        Ok(count)
+    }
+
     /// Skip the first count items that would be returned by iteration.
     /// This avoids reading anything into memory besides the indexes for each
     /// file, and the first chunk that wouldn't be skipped.
     ///
     /// Returns the number of items skipped. This will only ever be less than
     /// count if we exhausted all shard files.
-    pub fn skip(&mut self, count: usize) -> Result<usize, Error> {
+    pub fn skip_lazy(&mut self, count: usize) -> Result<usize, Error> {
         let mut skipped = 0;
         loop {
             let Some(mut file_reader) = self.take_active_reader().transpose()? else {
@@ -97,6 +112,7 @@ where
         Ok(skipped)
     }
 
+    /// Take the current active shard reader, or advance to the next.
     fn take_active_reader(&mut self) -> Option<Result<UnsortedShardFileReader<T, S>, Error>> {
         let reader = if let Some(reader) = self.active_shard_reader.take() {
             reader
@@ -160,6 +176,7 @@ struct UnsortedShardFileReader<T, S = DefaultSort>
 where
     S: SortKey<T>,
 {
+    count: usize,
     file_index_iter: Box<dyn Iterator<Item = KeylessShardRecord>>,
     shard_iter: Option<UnsortedShardIter<T>>,
     phantom: PhantomData<S>,
@@ -178,6 +195,7 @@ where
         <S as SortKey<T>>::Key: 'static,
     {
         let reader = ShardReaderSingle::<T, S>::open(path)?;
+        let count = reader.len();
         let mut file_index_iter = reader.index.into_iter().map(|r| KeylessShardRecord {
             offset: r.offset,
             len_bytes: r.len_bytes,
@@ -188,10 +206,16 @@ where
             return Ok(None);
         };
         Ok(Some(Self {
+            count,
             shard_iter: Some(UnsortedShardIter::new(reader.file, first_index_entry)?),
             file_index_iter: Box::new(file_index_iter),
             phantom: Default::default(),
         }))
+    }
+
+    /// Return the total number of items in this shard file.
+    pub fn len(&self) -> usize {
+        self.count
     }
 
     /// Get the next item out of this file.
@@ -240,6 +264,11 @@ where
                     skipped,
                     exhausted: false,
                 });
+            } else {
+                // Advance to the next shard, if there is one.
+                if let Some(next_index_record) = self.file_index_iter.next() {
+                    self.shard_iter = Some(shard_iter.reset(next_index_record)?);
+                }
             }
         }
     }

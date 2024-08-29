@@ -95,7 +95,7 @@ fn main() {
 
         // Open finished file
         let all_items = if unsorted_read {
-            UnsortedShardReader::<T1>::open(tmp.path())?.collect::<Result<_, _>>()?
+            UnsortedShardReader::<T1>::open(tmp.path()).collect::<Result<_, _>>()?
         } else {
             let reader = ShardReader::<T1>::open(tmp.path())?;
 
