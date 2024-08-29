@@ -42,7 +42,7 @@ where
 impl<T, S> UnsortedShardReader<T, S>
 where
     T: DeserializeOwned,
-    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
+    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned + Send,
     S: SortKey<T>,
 {
     /// Open a single shard file.
@@ -138,7 +138,7 @@ where
 impl<T, S> Iterator for UnsortedShardReader<T, S>
 where
     T: DeserializeOwned,
-    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
+    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned + Send,
     S: SortKey<T>,
 {
     type Item = Result<T, Error>;
@@ -178,7 +178,7 @@ where
     S: SortKey<T>,
 {
     count: usize,
-    file_index_iter: Box<dyn Iterator<Item = KeylessShardRecord>>,
+    file_index_iter: Box<dyn Iterator<Item = KeylessShardRecord> + Send>,
     shard_iter: Option<UnsortedShardIter<T>>,
     phantom: PhantomData<S>,
 }
@@ -186,7 +186,7 @@ where
 impl<T, S> UnsortedShardFileReader<T, S>
 where
     T: DeserializeOwned,
-    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned,
+    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned + Send,
     S: SortKey<T>,
 {
     /// Create a unsorted reader for a single shard file.
