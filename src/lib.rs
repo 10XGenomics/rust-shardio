@@ -1791,10 +1791,12 @@ mod shard_tests {
             disk_chunk_size, producer_chunk_size, n_items
         );
 
-        let tmp = tempfile::NamedTempFile::new()?;
+        // Write two files to check file set reading logic.
 
-        // Write and close file
-        let true_items = {
+        let create = || -> Result<_, Error> {
+            let tmp = tempfile::NamedTempFile::new()?;
+
+            // Write and close file
             let mut writer: ShardWriter<T1> = ShardWriter::new(
                 tmp.path(),
                 producer_chunk_size,
@@ -1808,12 +1810,20 @@ mod shard_tests {
 
             writer.finish()?;
             true_items.sort();
-            true_items
+            Ok((tmp, true_items))
         };
 
+        let (tmp0, true_items0) = create()?;
+        let (tmp1, true_items1) = create()?;
+
+        let mut true_items = Vec::from_iter(true_items0.into_iter().chain(true_items1));
+        true_items.sort();
+
+        let file_set = [tmp0.path(), tmp1.path()];
+
         if do_read {
-            // Open finished file
-            let reader = ShardReader::<T1>::open(tmp.path())?;
+            // Open finished files
+            let reader = ShardReader::<T1>::open_set(&file_set)?;
             let iter = reader.iter_range(&Range::all())?;
 
             let all_items_res: Result<Vec<_>, Error> = iter.collect();
@@ -1827,8 +1837,8 @@ mod shard_tests {
             }
 
             for rc in [1, 3, 8, 15, 27].iter() {
-                // Open finished file & test chunked reads
-                let set_reader = ShardReader::<T1>::open(tmp.path())?;
+                // Open finished files & test chunked reads
+                let set_reader = ShardReader::<T1>::open_set(&file_set)?;
                 let mut all_items_chunks = Vec::new();
 
                 // Read in chunks
@@ -1853,14 +1863,14 @@ mod shard_tests {
             }
 
             // Check the unsorted read
-            assert_eq!(n_items, UnsortedShardReader::<T1>::len(&[tmp.path()])?);
-            let unsorted_reader = UnsortedShardReader::<T1>::open(tmp.path());
+            assert_eq!(2 * n_items, UnsortedShardReader::<T1>::len(&file_set)?);
+            let unsorted_reader = UnsortedShardReader::<T1>::open_set(&file_set);
             let all_items_res: Result<Vec<_>, Error> = unsorted_reader.collect();
             let all_items = all_items_res?;
             assert!(set_compare(&true_items, &all_items));
 
             let check_unsorted_skip = |to_skip: usize| -> Result<(), Error> {
-                let mut unsorted_reader_skip = UnsortedShardReader::<T1>::open(tmp.path());
+                let mut unsorted_reader_skip = UnsortedShardReader::<T1>::open_set(&file_set);
                 let skipped = unsorted_reader_skip.skip_lazy(to_skip)?;
                 assert_eq!(to_skip, skipped);
                 let all_items_res_skip: Result<Vec<_>, Error> = unsorted_reader_skip.collect();
@@ -1872,8 +1882,10 @@ mod shard_tests {
             check_unsorted_skip(0)?;
             check_unsorted_skip(1)?;
             check_unsorted_skip(disk_chunk_size)?;
-            check_unsorted_skip(n_items)?;
             check_unsorted_skip((disk_chunk_size * 3) + 1)?;
+            check_unsorted_skip(n_items)?; // skip entire first file
+            check_unsorted_skip(n_items + 1)?; // skip entire first file plus next item
+            check_unsorted_skip(n_items * 2)?; // skip everything
         }
         Ok(())
     }
