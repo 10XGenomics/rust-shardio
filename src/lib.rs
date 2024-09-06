@@ -1859,14 +1859,21 @@ mod shard_tests {
             let all_items = all_items_res?;
             assert!(set_compare(&true_items, &all_items));
 
-            // Check that the skip_lazy feature produces the expected results.
-            let mut unsorted_reader_skip = UnsortedShardReader::<T1>::open(tmp.path());
-            let to_skip = (disk_chunk_size * 3) + 1;
-            let skipped = unsorted_reader_skip.skip_lazy(to_skip)?;
-            assert_eq!(to_skip, skipped);
-            let all_items_res_skip: Result<Vec<_>, Error> = unsorted_reader_skip.collect();
-            let all_items_skip = all_items_res_skip?;
-            assert_eq!(&all_items[to_skip..], &all_items_skip);
+            let check_unsorted_skip = |to_skip: usize| -> Result<(), Error> {
+                let mut unsorted_reader_skip = UnsortedShardReader::<T1>::open(tmp.path());
+                let skipped = unsorted_reader_skip.skip_lazy(to_skip)?;
+                assert_eq!(to_skip, skipped);
+                let all_items_res_skip: Result<Vec<_>, Error> = unsorted_reader_skip.collect();
+                let all_items_skip = all_items_res_skip?;
+                assert_eq!(&all_items[to_skip..], &all_items_skip);
+                Ok(())
+            };
+
+            check_unsorted_skip(0)?;
+            check_unsorted_skip(1)?;
+            check_unsorted_skip(disk_chunk_size)?;
+            check_unsorted_skip(n_items)?;
+            check_unsorted_skip((disk_chunk_size * 3) + 1)?;
         }
         Ok(())
     }
