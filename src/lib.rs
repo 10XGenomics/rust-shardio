@@ -1395,6 +1395,16 @@ where
     }
 }
 
+/// Ensure that readers are Sync.
+#[allow(dead_code)]
+const fn assert_readers_are_sync() {
+    const fn takes_sync<T: Sync>() {}
+    takes_sync::<ShardReader<usize, DefaultSort>>();
+    takes_sync::<RangeIter<'static, usize, DefaultSort>>();
+    takes_sync::<ShardIter<'static, usize, DefaultSort>>();
+    takes_sync::<MergeIterator<'static, usize, DefaultSort>>();
+}
+
 #[cfg(test)]
 mod shard_tests {
     use super::*;
@@ -1658,7 +1668,7 @@ mod shard_tests {
     where
         T: 'static + Serialize + DeserializeOwned + Clone + Send + Eq + Debug + Hash,
         S: SortKey<T>,
-        <S as SortKey<T>>::Key: 'static + Send + Serialize + DeserializeOwned,
+        <S as SortKey<T>>::Key: 'static + Send + Sync + Serialize + DeserializeOwned,
     {
         let mut files = Vec::new();
 

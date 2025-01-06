@@ -33,7 +33,7 @@ where
 {
     /// Iterator over the shard files in the set, opening readers.
     shard_reader_iter:
-        Box<dyn Iterator<Item = Result<UnsortedShardFileReader<T, S>, Error>> + Send>,
+        Box<dyn Iterator<Item = Result<UnsortedShardFileReader<T, S>, Error>> + Send + Sync>,
 
     /// Iterator over the current shard file.
     active_shard_reader: Option<UnsortedShardFileReader<T, S>>,
@@ -42,22 +42,16 @@ where
 impl<T, S> UnsortedShardReader<T, S>
 where
     T: DeserializeOwned,
-    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned + Send,
+    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned + Send + Sync + 'static,
     S: SortKey<T>,
 {
     /// Open a single shard file.
-    pub fn open<P: AsRef<Path>>(shard_file: P) -> Self
-    where
-        <S as SortKey<T>>::Key: 'static,
-    {
+    pub fn open<P: AsRef<Path>>(shard_file: P) -> Self {
         Self::open_set(&[shard_file])
     }
 
     /// Open a set of shard files.
-    pub fn open_set<P: AsRef<Path>>(shard_files: &[P]) -> Self
-    where
-        <S as SortKey<T>>::Key: 'static,
-    {
+    pub fn open_set<P: AsRef<Path>>(shard_files: &[P]) -> Self {
         let reader_iter = shard_files
             .iter()
             .map(|f| f.as_ref().into())
@@ -71,10 +65,7 @@ where
     }
 
     /// Compute the total number of elements in this set of shard files.
-    pub fn len<P: AsRef<Path>>(shard_files: &[P]) -> Result<usize, Error>
-    where
-        <S as SortKey<T>>::Key: 'static,
-    {
+    pub fn len<P: AsRef<Path>>(shard_files: &[P]) -> Result<usize, Error> {
         // Create a set reader, and consume all the files, just getting counts.
         let files_reader = Self::open_set(shard_files);
         let mut count = 0;
@@ -138,7 +129,7 @@ where
 impl<T, S> Iterator for UnsortedShardReader<T, S>
 where
     T: DeserializeOwned,
-    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned + Send,
+    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned + Send + Sync + 'static,
     S: SortKey<T>,
 {
     type Item = Result<T, Error>;
@@ -178,7 +169,7 @@ where
     S: SortKey<T>,
 {
     count: usize,
-    file_index_iter: Box<dyn Iterator<Item = KeylessShardRecord> + Send>,
+    file_index_iter: Box<dyn Iterator<Item = KeylessShardRecord> + Send + Sync>,
     shard_iter: Option<UnsortedShardIter<T>>,
     phantom: PhantomData<S>,
 }
@@ -186,15 +177,12 @@ where
 impl<T, S> UnsortedShardFileReader<T, S>
 where
     T: DeserializeOwned,
-    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned + Send,
+    <S as SortKey<T>>::Key: Clone + Ord + DeserializeOwned + Send + Sync + 'static,
     S: SortKey<T>,
 {
     /// Create a unsorted reader for a single shard file.
     /// Return Ok(None) if the specified shard file is empty.
-    pub fn new(path: &Path) -> Result<Option<Self>, Error>
-    where
-        <S as SortKey<T>>::Key: 'static,
-    {
+    pub fn new(path: &Path) -> Result<Option<Self>, Error> {
         let reader = ShardReaderSingle::<T, S>::open(path)?;
         let count = reader.len();
         let mut file_index_iter = reader.index.into_iter().map(|r| KeylessShardRecord {
@@ -347,4 +335,12 @@ where
 struct SkipResult {
     skipped: usize,
     exhausted: bool,
+}
+
+/// Ensure that readers are Sync.
+#[allow(dead_code)]
+const fn assert_readers_are_sync() {
+    const fn takes_sync<T: Sync>() {}
+    takes_sync::<UnsortedShardFileReader<usize, DefaultSort>>();
+    takes_sync::<UnsortedShardReader<usize, DefaultSort>>();
 }
