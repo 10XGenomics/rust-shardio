@@ -1215,6 +1215,8 @@ where
     iterators: Vec<RangeIter<'a, T, S>>,
     merge_heap: MinMaxHeap<(SortableItem<S::Key, T>, usize)>,
     phantom_s: PhantomData<S>,
+    max_active_shard: usize,
+    active_shard_log: usize,
 }
 
 impl<'a, T, S> MergeIterator<'a, T, S>
@@ -1241,6 +1243,8 @@ where
             iterators,
             merge_heap,
             phantom_s: PhantomData,
+            max_active_shard: 0,
+            active_shard_log: 128,
         })
     }
 }
@@ -1256,9 +1260,19 @@ where
     type Item = Result<T, Error>;
 
     fn next(&mut self) -> Option<Result<T, Error>> {
+        let active_shard_count: usize = self
+            .iterators
+            .iter()
+            .map(|iter| iter.active_queue.len())
+            .sum();
+        self.max_active_shard = self.max_active_shard.max(active_shard_count);
+        if active_shard_count > self.active_shard_log {
+            warn!("active shards: {active_shard_count}");
+            self.active_shard_log *= 2;
+        }
         let next_itr = self.merge_heap.pop_min();
 
-        next_itr.map(|(item, i)| {
+        let ret_val = next_itr.map(|(item, i)| {
             // Get next-next value for this iterator
             let next = self.iterators[i].next().transpose()?;
 
@@ -1269,7 +1283,11 @@ where
             }
 
             Ok(item.item)
-        })
+        });
+        if ret_val.is_none() {
+            warn!("final max active shards: {}", self.max_active_shard);
+        }
+        ret_val
     }
 }
 
