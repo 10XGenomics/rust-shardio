@@ -864,6 +864,20 @@ where
             })
             .sum::<usize>()
     }
+
+    /// Estimate an upper bound on the number of shards that may contain the given key
+    pub fn n_shards_intersect_with(&self, key: &<S as SortKey<T>>::Key) -> usize {
+        self.index
+            .iter()
+            .map(|x| {
+                if x.start_key <= *key && x.end_key > *key {
+                    1
+                } else {
+                    0
+                }
+            })
+            .sum::<usize>()
+    }
 }
 
 use std::borrow::Borrow;
@@ -1386,11 +1400,18 @@ where
     }
 
     /// Estimate an upper bound on the total number of values held by a range
-    #[allow(dead_code)]
     pub fn est_len_range(&self, range: &Range<<S as SortKey<T>>::Key>) -> usize {
         self.readers
             .iter()
             .map(|x| x.est_len_range(range))
+            .sum::<usize>()
+    }
+
+    /// How many shard ranges intersect with the provided key
+    pub fn n_shards_intersect_with(&self, key: &<S as SortKey<T>>::Key) -> usize {
+        self.readers
+            .iter()
+            .map(|x| x.n_shards_intersect_with(key))
             .sum::<usize>()
     }
 }
