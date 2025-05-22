@@ -865,6 +865,14 @@ where
             .sum::<usize>()
     }
 
+    /// Count the number of shards that intersect with a range.
+    pub fn n_shards_intersect_range(&self, range: &Range<<S as SortKey<T>>::Key>) -> usize {
+        self.index
+            .iter()
+            .map(|x| if range.intersects_shard(x) { 1 } else { 0 })
+            .sum::<usize>()
+    }
+
     /// Estimate an upper bound on the number of shards that may contain the given key
     pub fn n_shards_intersect_with(&self, key: &<S as SortKey<T>>::Key) -> usize {
         self.index
@@ -1404,6 +1412,14 @@ where
         self.readers
             .iter()
             .map(|x| x.est_len_range(range))
+            .sum::<usize>()
+    }
+
+    /// How many shards intersect with a given range
+    pub fn n_shards_intersect_range(&self, range: &Range<<S as SortKey<T>>::Key>) -> usize {
+        self.readers
+            .iter()
+            .map(|x| x.n_shards_intersect_range(range))
             .sum::<usize>()
     }
 
