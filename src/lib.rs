@@ -878,7 +878,7 @@ where
         self.index
             .iter()
             .map(|x| {
-                if x.start_key <= *key && x.end_key > *key {
+                if x.start_key <= *key && x.end_key >= *key {
                     1
                 } else {
                     0
