@@ -1036,6 +1036,7 @@ where
     active_queue: MinMaxHeap<ShardIter<'a, T, S>>,
     waiting_queue: MinMaxHeap<&'a ShardRecord<<S as SortKey<T>>::Key>>,
     warn_limit: usize,
+    read_count: usize,
 }
 
 impl<'a, T, S> RangeIter<'a, T, S>
@@ -1072,6 +1073,7 @@ where
             active_queue,
             waiting_queue,
             warn_limit: WARN_ACTIVE_SHARDS,
+            read_count: 0,
         };
         iter.warn_active_shards();
 
@@ -1152,6 +1154,7 @@ where
 
             match self.next_active() {
                 Some(Ok(v)) => {
+                    self.read_count += 1;
                     let c = self.range.cmp(&S::sort_key(&v));
                     match c {
                         Rorder::Before => (),
@@ -1227,11 +1230,14 @@ where
 {
     fn new(mut iterators: Vec<RangeIter<'a, T, S>>) -> Result<MergeIterator<'a, T, S>, Error> {
         warn!("Creating merge iterator.");
+        let mut wasted_count: usize = 0;
         let mut merge_heap = MinMaxHeap::new();
 
         for (idx, itr) in iterators.iter_mut().enumerate() {
             warn!("Initializing range iterator {idx}.");
             let item = itr.next().transpose()?;
+            warn!("Read {} items to initialize.", itr.read_count);
+            wasted_count += itr.read_count;
 
             // If we have a next item, add it's key to the heap
             if let Some(ii) = item {
@@ -1240,6 +1246,7 @@ where
                 merge_heap.push((sortable_item, idx));
             }
         }
+        warn!("Wasted {wasted_count} items initializing merge iterator.");
 
         Ok(MergeIterator {
             iterators,
