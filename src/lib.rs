@@ -128,7 +128,7 @@ pub const SHARD_ITER_SZ: usize = 8 + 8 + 8_192 + 32_768 + 65_536 * 2 + 131_072 +
 
 // this number is chosen such that, for the expected size of a ShardIter above,
 //   represents at least 1GiB of memory (1024^3 / 303124 =~ 3542.3)
-const WARN_ACTIVE_SHARDS: usize = 3_543;
+const WARN_ACTIVE_SHARDS: usize = 128; //3_543;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// A group of `len_items` items, from shard `shard`, stored at position `offset`, using `block_size` bytes on-disk,
@@ -1226,9 +1226,11 @@ where
     RangeIter<'a, T, S>: Iterator<Item = Result<T, Error>>,
 {
     fn new(mut iterators: Vec<RangeIter<'a, T, S>>) -> Result<MergeIterator<'a, T, S>, Error> {
+        warn!("Creating merge iterator.");
         let mut merge_heap = MinMaxHeap::new();
 
         for (idx, itr) in iterators.iter_mut().enumerate() {
+            warn!("Initializing range iterator {idx}.");
             let item = itr.next().transpose()?;
 
             // If we have a next item, add it's key to the heap
@@ -1346,6 +1348,7 @@ where
         &'a self,
         range: &Range<<S as SortKey<T>>::Key>,
     ) -> Result<MergeIterator<'a, T, S>, Error> {
+        warn!("Create range iterators.");
         let mut iters = Vec::new();
         for r in self.readers.iter() {
             let iter = r.iter_range(range)?;
