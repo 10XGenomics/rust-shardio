@@ -225,12 +225,12 @@ where
     /// # Arguments
     /// * `path` - Path to newly created output file
     /// * `sender_buffer_size` - number of items to buffer on the sending thread before transferring data to the writer.
-    ///                          Each transfer to the writer requires one channel send, and one allocation.
-    ///                          Set to ~16 or 32 it you're sending items very rapidly (>100k/s).
+    ///   Each transfer to the writer requires one channel send, and one allocation.
+    ///   Set to ~16 or 32 it you're sending items very rapidly (>100k/s).
     /// * `disk_chunk_size` - Number of items to store in each chunk on disk. Controls the tradeoff between indexing overhead and the granularity
-    ///                       of reads into the sorted dataset. When reading, shardio must iterate from the start of a chunk to access an item.
+    ///   of reads into the sorted dataset. When reading, shardio must iterate from the start of a chunk to access an item.
     /// * `item_buffer_size` - Number of items to buffer before sorting, chunking and writing items to disk. More buffering causes each chunk
-    ///                        to cover a smaller interval of key space (allowing for more efficient reading), but requires more memory.
+    ///   to cover a smaller interval of key space (allowing for more efficient reading), but requires more memory.
     pub fn new<P: AsRef<Path>>(
         path: P,
         sender_buffer_size: usize,
@@ -1064,9 +1064,11 @@ where
 
     /// Restore all the shards that start at or before this item, or the next usable shard
     fn activate_shards(&mut self) -> Result<(), Error> {
-        while self.waiting_queue.peek_min().map_or(false, |shard| {
-            Some(&shard.start_key) < self.peek_active_next()
-        }) || (self.peek_active_next().is_none() && !self.waiting_queue.is_empty())
+        while self
+            .waiting_queue
+            .peek_min()
+            .is_some_and(|shard| Some(&shard.start_key) < self.peek_active_next())
+            || (self.peek_active_next().is_none() && !self.waiting_queue.is_empty())
         {
             let shard = self.waiting_queue.pop_min().unwrap();
             let iter = self.reader.iter_shard(shard)?;
@@ -1316,7 +1318,7 @@ where
     }
 
     /// Iterate over all items
-    pub fn iter(&self) -> Result<MergeIterator<T, S>, Error> {
+    pub fn iter(&'_ self) -> Result<MergeIterator<'_, T, S>, Error> {
         self.iter_range(&Range::all())
     }
 
@@ -1414,7 +1416,7 @@ mod shard_tests {
     use std::collections::HashSet;
     use std::fmt::Debug;
     use std::hash::Hash;
-    use std::iter::{repeat, FromIterator};
+    use std::iter::{repeat_n, FromIterator};
     use std::path::PathBuf;
 
     #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord, Hash)]
@@ -1591,9 +1593,7 @@ mod shard_tests {
             let manager: ShardWriter<T1> = ShardWriter::new(tmp.path(), 16, 64, 1 << 10).unwrap();
 
             let mut g = Gen::new(10);
-            let true_items = repeat(rand_items(1, &mut g)[0])
-                .take(n_items)
-                .collect::<Vec<_>>();
+            let true_items = repeat_n(rand_items(1, &mut g)[0], n_items).collect::<Vec<_>>();
 
             // Sender must be closed
             {
@@ -2074,21 +2074,21 @@ mod shard_tests {
 
     impl SortKey<T2> for S2 {
         type Key = u16;
-        fn sort_key(v: &T2) -> Cow<u16> {
+        fn sort_key(v: &'_ T2) -> Cow<'_, u16> {
             Cow::Owned(v.0)
         }
     }
 
     impl SortKey<T3> for S2 {
         type Key = u16;
-        fn sort_key(v: &T3) -> Cow<u16> {
+        fn sort_key(v: &'_ T3) -> Cow<'_, u16> {
             Cow::Owned(v.0)
         }
     }
 
     impl SortKey<T2> for S3 {
         type Key = u16;
-        fn sort_key(v: &T2) -> Cow<u16> {
+        fn sort_key(v: &'_ T2) -> Cow<'_, u16> {
             Cow::Owned(v.0)
         }
     }
