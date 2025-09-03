@@ -12,6 +12,7 @@ use anyhow::{bail, Result};
 use zstd::zstd_safe;
 
 /// The compressors supported by shardio.
+#[derive(Clone, Copy)]
 pub enum Compressor {
     /// lz4 compression at level 2
     /// this appears to be a good general trad-off of speed and compression ratio.
@@ -101,6 +102,23 @@ impl<R: Read> Read for Decoder<R> {
         match self {
             Self::Lz4(d) => d.read(buf),
             Self::Zstd(d) => d.read(buf),
+        }
+    }
+}
+
+impl<R: Read> Decoder<R> {
+    /// Finish the current decode and retrieve the inner reader and the compressor.
+    pub fn finish(self) -> (R, Compressor) {
+        match self {
+            Self::Lz4(d) => {
+                // The only error condition possible here is if we didn't finish
+                // reading all of the data from the compressed stream, but that
+                // is most likely intended behavior, since we may be done reading
+                // items from a shard partway through.
+                let (r, _result) = d.finish();
+                (r.into_inner(), Compressor::Lz4)
+            }
+            Self::Zstd(d) => (d.finish().into_inner(), Compressor::Zstd),
         }
     }
 }

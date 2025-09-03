@@ -4,6 +4,8 @@
 //! Data is written to sorted chunks. When reading shardio will merge the data on the fly into a single sorted view. You can
 //! also procss disjoint subsets of sorted data.
 //!
+//! Different compression libraries are available; the default is lz4f level 2.
+//!
 //! Additionally, you can also iterate through the data in the order they are written to disk. The items will not
 //! in general follow the sort order. Such an iterator does not involve the merge sort step and hence does not
 //! have the memory overhead associated with keeping multiple items in memory to perform the merge sort.
@@ -29,9 +31,10 @@
 //!         // which affect how many disk chunks need to be read to
 //!         // satisfy a range query when reading.
 //!         // In this example the 'built-in' sort order given by #[derive(Ord)]
-//!         // is used.
+//!         // is used. By default lz4 compression is used; use the
+//!         // with_compressor constructor to explicitly specify which to use:
 //!         let mut writer: ShardWriter<DataStruct> =
-//!             ShardWriter::new(filename, 64, 256, 1<<16)?;
+//!             ShardWriter::with_compressor(filename, 64, 256, 1<<16, Compressor::Lz4)?;
 //!
 //!         // Get a handle to send data to the file
 //!         let mut sender = writer.get_sender();
@@ -214,7 +217,32 @@ where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: 'static + Send + Ord + Serialize + Clone,
 {
-    /// Create a writer for storing data items of type `T`.
+    /// Create a writer for storing data items of type `T` using the default compressor.
+    /// # Arguments
+    /// * `path` - Path to newly created output file
+    /// * `sender_buffer_size` - number of items to buffer on the sending thread before transferring data to the writer.
+    ///   Each transfer to the writer requires one channel send, and one allocation.
+    ///   Set to ~16 or 32 it you're sending items very rapidly (>100k/s).
+    /// * `disk_chunk_size` - Number of items to store in each chunk on disk. Controls the tradeoff between indexing overhead and the granularity
+    ///   of reads into the sorted dataset. When reading, shardio must iterate from the start of a chunk to access an item.
+    /// * `item_buffer_size` - Number of items to buffer before sorting, chunking and writing items to disk. More buffering causes each chunk
+    ///   to cover a smaller interval of key space (allowing for more efficient reading), but requires more memory.
+    pub fn new<P: AsRef<Path>>(
+        path: P,
+        sender_buffer_size: usize,
+        disk_chunk_size: usize,
+        item_buffer_size: usize,
+    ) -> Result<ShardWriter<T, S>, Error> {
+        Self::with_compressor(
+            path,
+            sender_buffer_size,
+            disk_chunk_size,
+            item_buffer_size,
+            Compressor::Lz4,
+        )
+    }
+
+    /// Create a writer for storing data items of type `T`, using an explicit compressor.
     /// # Arguments
     /// * `path` - Path to newly created output file
     /// * `sender_buffer_size` - number of items to buffer on the sending thread before transferring data to the writer.
@@ -225,7 +253,7 @@ where
     /// * `item_buffer_size` - Number of items to buffer before sorting, chunking and writing items to disk. More buffering causes each chunk
     ///   to cover a smaller interval of key space (allowing for more efficient reading), but requires more memory.
     /// * `compressor` - The compressor to use.
-    pub fn new<P: AsRef<Path>>(
+    pub fn with_compressor<P: AsRef<Path>>(
         path: P,
         sender_buffer_size: usize,
         disk_chunk_size: usize,
@@ -1597,8 +1625,7 @@ mod shard_tests {
 
         // Write and close file
         let true_items = {
-            let manager: ShardWriter<T1> =
-                ShardWriter::new(tmp.path(), 16, 64, 1 << 10, Compressor::Lz4).unwrap();
+            let manager: ShardWriter<T1> = ShardWriter::new(tmp.path(), 16, 64, 1 << 10).unwrap();
 
             let mut g = Gen::new(10);
             let true_items = repeat_n(rand_items(1, &mut g)[0], n_items).collect::<Vec<_>>();
@@ -1688,7 +1715,6 @@ mod shard_tests {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
-                Compressor::Lz4,
             )?;
 
             let mut sender = writer.get_sender();
@@ -1750,6 +1776,16 @@ mod shard_tests {
             buffer_size,
             n_items,
             true,
+            Compressor::Lz4,
+        )
+        .unwrap();
+        check_round_trip_opt(
+            disk_chunk_size,
+            producer_chunk_size,
+            buffer_size,
+            n_items,
+            true,
+            Compressor::Zstd,
         )
         .unwrap();
     }
@@ -1804,6 +1840,7 @@ mod shard_tests {
         buffer_size: usize,
         n_items: usize,
         do_read: bool,
+        compressor: Compressor,
     ) -> Result<(), Error> {
         println!(
             "test round trip: disk_chunk_size: {}, producer_chunk_size: {}, n_items: {}",
@@ -1816,12 +1853,12 @@ mod shard_tests {
             let tmp = tempfile::NamedTempFile::new()?;
 
             // Write and close file
-            let mut writer: ShardWriter<T1> = ShardWriter::new(
+            let mut writer: ShardWriter<T1> = ShardWriter::with_compressor(
                 tmp.path(),
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
-                Compressor::Lz4,
+                compressor,
             )?;
 
             let mut g = Gen::new(10);
@@ -1931,7 +1968,6 @@ mod shard_tests {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
-                Compressor::Lz4,
             )?;
 
             let mut g = Gen::new(10);
@@ -2030,7 +2066,6 @@ mod shard_tests {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
-                Compressor::Lz4,
             )?;
 
             let mut g = Gen::new(10);
@@ -2119,7 +2154,6 @@ mod shard_tests {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
-                Compressor::Lz4,
             )?;
             let mut sender = manager.get_sender();
             sender.send(T2(0))?;
@@ -2149,7 +2183,6 @@ mod shard_tests {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
-                Compressor::Lz4,
             )?;
             let mut sender = manager.get_sender();
             sender.send(T2(0))?;

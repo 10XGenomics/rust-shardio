@@ -68,7 +68,6 @@ fn main() {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
-                Compressor::Lz4,
             )?;
             let mut true_items = Vec::with_capacity(n_items);
 
