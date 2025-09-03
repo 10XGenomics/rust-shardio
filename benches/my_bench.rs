@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::Error;
 use criterion::Criterion;
 use serde::{Deserialize, Serialize};
-use shardio::{ShardReader, ShardWriter, UnsortedShardReader};
+use shardio::{Compressor, ShardReader, ShardWriter, UnsortedShardReader};
 
 #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord)]
 struct T1 {
@@ -68,6 +68,7 @@ fn main() {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
+                Compressor::Lz4,
             )?;
             let mut true_items = Vec::with_capacity(n_items);
 

@@ -109,24 +109,17 @@ pub mod range;
 /// Helper methods
 pub mod helper;
 
+use crate::compress::Decoder;
 pub use crate::range::Range;
 use range::Rorder;
+
+mod compress;
+pub use compress::Compressor;
 
 mod unsorted;
 pub use unsorted::*;
 
-/// The size (in bytes) of a ShardIter object (mostly buffers)
-// ? sizeof(T)
-// + 8 usize items_remaining
-// + 8 &bincode::Config
-// + 8KB BufReader
-// + 32KB of lz4-rs internal buffer
-// + 64KB of lz4-sys default blockSize (x2)
-// + 128KB lz4-sys default blockLinked
-// + 4 lz4-sys checksum
-pub const SHARD_ITER_SZ: usize = 8 + 8 + 8_192 + 32_768 + 65_536 * 2 + 131_072 + 4;
-
-// this number is chosen such that, for the expected size of a ShardIter above,
+// this number is chosen such that, for the expected size of a ShardIter using lz4,
 //   represents at least 1GiB of memory (1024^3 / 303124 =~ 3542.3)
 const WARN_ACTIVE_SHARDS: usize = 3_543;
 
@@ -231,19 +224,26 @@ where
     ///   of reads into the sorted dataset. When reading, shardio must iterate from the start of a chunk to access an item.
     /// * `item_buffer_size` - Number of items to buffer before sorting, chunking and writing items to disk. More buffering causes each chunk
     ///   to cover a smaller interval of key space (allowing for more efficient reading), but requires more memory.
+    /// * `compressor` - The compressor to use.
     pub fn new<P: AsRef<Path>>(
         path: P,
         sender_buffer_size: usize,
         disk_chunk_size: usize,
         item_buffer_size: usize,
+        compressor: Compressor,
     ) -> Result<ShardWriter<T, S>, Error> {
         assert!(disk_chunk_size >= 1);
         assert!(item_buffer_size >= 1);
         assert!(sender_buffer_size >= 1);
         assert!(item_buffer_size >= sender_buffer_size);
 
-        let inner =
-            ShardWriterInner::new(disk_chunk_size, item_buffer_size, sender_buffer_size, path)?;
+        let inner = ShardWriterInner::new(
+            disk_chunk_size,
+            item_buffer_size,
+            sender_buffer_size,
+            compressor,
+            path,
+        )?;
 
         Ok(ShardWriter {
             inner: Some(Arc::new(inner)),
@@ -488,17 +488,20 @@ where
     S: SortKey<T>,
     <S as SortKey<T>>::Key: Ord + Clone + Serialize,
 {
-    // Current start position of next chunk
+    /// Current start position of next chunk.
     cursor: usize,
-    // Record of chunks written
+    /// Record of chunks written.
     regions: Vec<ShardRecord<<S as SortKey<T>>::Key>>,
-    // File handle
+    /// File handle.
     file: File,
-    // Size of disk chunks
+    /// Size of disk chunks.
     chunk_size: usize,
-    // Buffers for use when writing
+    /// Buffer for use when serializing.
     serialize_buffer: Vec<u8>,
+    /// Buffer for use when compressing.
     compress_buffer: Vec<u8>,
+    /// Which compressor to use.
+    compressor: Compressor,
 }
 
 impl<T, S> BufHandler<T> for SortAndWriteHandler<T, S>
@@ -532,6 +535,7 @@ where
     /// Create a new handler using the provided chunk size, writing to path.
     pub fn new<P: AsRef<Path>>(
         chunk_size: usize,
+        compressor: Compressor,
         path: P,
     ) -> Result<SortAndWriteHandler<T, S>, Error> {
         let file = File::create(path)?;
@@ -542,14 +546,9 @@ where
             file,
             serialize_buffer: Vec::new(),
             compress_buffer: Vec::new(),
+            compressor,
             chunk_size,
         })
-
-        // FIXME: write a magic string to the start of the file,
-        // and maybe some metadata about the types being stored and the
-        // compression scheme.
-        // FIXME: write to a TempFile that will be destroyed unless
-        // writing completes successfully.
     }
 
     fn write_chunk(&mut self, items: &[T]) -> Result<(), Error> {
@@ -567,19 +566,8 @@ where
             serialize_into(&mut self.serialize_buffer, item)?;
         }
 
-        {
-            use std::io::Write;
-            let mut encoder = lz4::EncoderBuilder::new()
-                .level(2) // this appears to be a good general trad-off of speed and compression ratio.
-                // note see these benchmarks for useful numers:
-                // http://quixdb.github.io/squash-benchmark/#ratio-vs-compression
-                // important note: lz4f (not lz4) is the relevant mode in those charts.
-                .build(&mut self.compress_buffer)?;
-
-            encoder.write_all(&self.serialize_buffer)?;
-            let (_, result) = encoder.finish();
-            result?;
-        }
+        self.compressor
+            .encode(&self.serialize_buffer, &mut self.compress_buffer)?;
 
         let cur_offset = self.cursor;
         let reg = ShardRecord {
@@ -598,7 +586,7 @@ where
         Ok(())
     }
 
-    /// Write out the shard positioning data
+    /// Write out the shard positioning data and which compressor is in use.
     pub fn write_index(&mut self) -> Result<(), Error> {
         let mut buf = Vec::new();
 
@@ -614,7 +602,7 @@ where
         self.file.seek(SeekFrom::Start(
             (index_block_position + index_block_size) as u64,
         ))?;
-        self.file.write_u64::<BigEndian>(0_u64)?;
+        self.file.write_u64::<BigEndian>(self.compressor.to_id())?;
         self.file
             .write_u64::<BigEndian>(index_block_position as u64)?;
         self.file.write_u64::<BigEndian>(index_block_size as u64)?;
@@ -645,9 +633,10 @@ where
         chunk_size: usize,
         buf_size: usize,
         sender_buffer_size: usize,
+        compressor: Compressor,
         path: impl AsRef<Path>,
     ) -> Result<ShardWriterInner<T, S>, Error> {
-        let handler = SortAndWriteHandler::new(chunk_size, path)?;
+        let handler = SortAndWriteHandler::new(chunk_size, compressor, path)?;
 
         let bufs = BufStates::FillAndWait(
             Vec::with_capacity(buf_size / 2),
@@ -778,6 +767,7 @@ where
 {
     file: File,
     index: Vec<ShardRecord<<S as SortKey<T>>::Key>>,
+    compressor: Compressor,
     p1: PhantomData<T>,
 }
 
@@ -793,20 +783,21 @@ where
     fn open<P: AsRef<Path>>(path: P) -> Result<ShardReaderSingle<T, S>, Error> {
         let f = File::open(path)?;
 
-        let (mut index, f) = Self::read_index_block(f)?;
+        let (mut index, compressor, f) = Self::read_index_block(f)?;
         index.sort();
 
         Ok(ShardReaderSingle {
             file: f,
             index,
+            compressor,
             p1: PhantomData,
         })
     }
 
     /// Read shard index
-    fn read_index_block(mut file: File) -> Result<(ShardRecordVec<T, S>, File), Error> {
+    fn read_index_block(mut file: File) -> Result<(ShardRecordVec<T, S>, Compressor, File), Error> {
         let _ = file.seek(SeekFrom::End(-24))?;
-        let _num_shards = file.read_u64::<BigEndian>()? as usize;
+        let compressor = Compressor::from_id(file.read_u64::<BigEndian>()?)?;
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position))?;
@@ -822,7 +813,18 @@ where
             ));
         }
         let recs = deserialize_from(&mut file)?;
-        Ok((recs, file))
+        Ok((recs, compressor, file))
+    }
+
+    /// Return the approximate number of bytes of memory needed for reading one shard.
+    pub fn shard_iter_size(&self) -> usize {
+        // The size (in bytes) of a ShardIter object (mostly buffers)
+        // ? sizeof(T)
+        // + 8 usize items_remaining
+        // + 8 &bincode::Config
+        // + 8KB BufReader
+        // + whatever the decompressor needs
+        8 + 8 + 8_192 + self.compressor.decompressor_mem_size_bytes()
     }
 
     /// Return an iterator over the items in the given `range` of keys.
@@ -907,7 +909,7 @@ where
     S: SortKey<T>,
 {
     next_item: Option<(T, S::Key)>,
-    decoder: lz4::Decoder<BufReader<ReadAdapter<&'a File, File>>>,
+    decoder: Decoder<BufReader<ReadAdapter<&'a File, File>>>,
     items_remaining: usize,
     phantom_s: PhantomData<S>,
 }
@@ -922,17 +924,17 @@ where
         reader: &'a ShardReaderSingle<T, S>,
         rec: ShardRecord<<S as SortKey<T>>::Key>,
     ) -> Result<Self, Error> {
-        let adp_reader = ReadAdapter::new(&reader.file, rec.offset, rec.len_bytes);
-        let buf_reader = BufReader::new(adp_reader);
-        let mut lz4_reader = lz4::Decoder::new(buf_reader)?;
+        let mut decompressed_reader = reader.compressor.decoder(BufReader::new(
+            ReadAdapter::new(&reader.file, rec.offset, rec.len_bytes),
+        ))?;
 
-        let first_item: T = deserialize_from(&mut lz4_reader)?;
+        let first_item: T = deserialize_from(&mut decompressed_reader)?;
         let first_key = S::sort_key(&first_item).into_owned();
         let items_remaining = rec.len_items - 1;
 
         Ok(ShardIter {
             next_item: Some((first_item, first_key)),
-            decoder: lz4_reader,
+            decoder: decompressed_reader,
             items_remaining,
             phantom_s: PhantomData,
         })
@@ -1094,7 +1096,7 @@ where
     fn warn_active_shards(&mut self) {
         let queue_len = self.active_queue.len();
         if queue_len >= self.warn_limit {
-            let mem_est_gib = (SHARD_ITER_SZ * queue_len) as f64 / 1024f64.powi(3);
+            let mem_est_gib = (self.reader.shard_iter_size() * queue_len) as f64 / 1024f64.powi(3);
             warn!(
                 "{} active shards! Memory usage may be impacted by at least {} GiB",
                 queue_len, mem_est_gib
@@ -1288,6 +1290,12 @@ where
         }
 
         Ok(ShardReader { readers })
+    }
+
+    /// Return the approximate number of bytes of memory needed for a single shard reader.
+    /// This assumes that all shards are using the same compression strategy.
+    pub fn shard_iter_size(&self) -> usize {
+        self.readers[0].shard_iter_size()
     }
 
     /// Read data from the given `range` into `data` buffer. The `data` buffer is cleared before adding items.
@@ -1590,7 +1598,8 @@ mod shard_tests {
 
         // Write and close file
         let true_items = {
-            let manager: ShardWriter<T1> = ShardWriter::new(tmp.path(), 16, 64, 1 << 10).unwrap();
+            let manager: ShardWriter<T1> =
+                ShardWriter::new(tmp.path(), 16, 64, 1 << 10, Compressor::Lz4).unwrap();
 
             let mut g = Gen::new(10);
             let true_items = repeat_n(rand_items(1, &mut g)[0], n_items).collect::<Vec<_>>();
@@ -1680,6 +1689,7 @@ mod shard_tests {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
+                Compressor::Lz4,
             )?;
 
             let mut sender = writer.get_sender();
@@ -1812,6 +1822,7 @@ mod shard_tests {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
+                Compressor::Lz4,
             )?;
 
             let mut g = Gen::new(10);
@@ -1921,6 +1932,7 @@ mod shard_tests {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
+                Compressor::Lz4,
             )?;
 
             let mut g = Gen::new(10);
@@ -2019,6 +2031,7 @@ mod shard_tests {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
+                Compressor::Lz4,
             )?;
 
             let mut g = Gen::new(10);
@@ -2107,6 +2120,7 @@ mod shard_tests {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
+                Compressor::Lz4,
             )?;
             let mut sender = manager.get_sender();
             sender.send(T2(0))?;
@@ -2136,6 +2150,7 @@ mod shard_tests {
                 producer_chunk_size,
                 disk_chunk_size,
                 buffer_size,
+                Compressor::Lz4,
             )?;
             let mut sender = manager.get_sender();
             sender.send(T2(0))?;
