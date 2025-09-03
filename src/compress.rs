@@ -15,7 +15,7 @@ use zstd::zstd_safe;
 #[derive(Clone, Copy)]
 pub enum Compressor {
     /// lz4 compression at level 2
-    /// this appears to be a good general trad-off of speed and compression ratio.
+    /// this appears to be a good general trade-off of speed and compression ratio.
     /// note see these benchmarks for useful numers:
     /// http://quixdb.github.io/squash-benchmark/#ratio-vs-compression
     /// important note: lz4f (not lz4) is the relevant mode in those charts.
