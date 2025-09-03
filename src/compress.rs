@@ -27,22 +27,22 @@ pub enum Compressor {
 }
 
 impl Compressor {
-    const LZ4_ID: &'static [u8; 8] = b"lz4     ";
-    const ZSTD_ID: &'static [u8; 8] = b"zstd    ";
+    const LZ4_MAGIC_NUMBER: u32 = 0x184D2204;
+    const ZSTD_MAGIC_NUMBER: u32 = 0xFD2FB528;
 
     /// Return a fixed-width identifier for this compressor, for encoding into a shard file.
-    pub fn to_id(&self) -> u64 {
+    pub fn to_magic_number(&self) -> u32 {
         match self {
-            Self::Lz4 => u64::from_be_bytes(*Self::LZ4_ID),
-            Self::Zstd => u64::from_be_bytes(*Self::ZSTD_ID),
+            Self::Lz4 => Self::LZ4_MAGIC_NUMBER,
+            Self::Zstd => Self::ZSTD_MAGIC_NUMBER,
         }
     }
 
     /// Match a fixed-width identifier to a known compressor.
-    pub fn from_id(id: u64) -> Result<Self> {
-        match &id.to_be_bytes() {
-            Self::LZ4_ID => Ok(Self::Lz4),
-            Self::ZSTD_ID => Ok(Self::Zstd),
+    pub fn from_magic_number(id: u32) -> Result<Self> {
+        match id {
+            Self::LZ4_MAGIC_NUMBER => Ok(Self::Lz4),
+            Self::ZSTD_MAGIC_NUMBER => Ok(Self::Zstd),
             unknown => bail!("unknown compressor: {unknown:?}"),
         }
     }

@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::Error;
 use criterion::Criterion;
 use serde::{Deserialize, Serialize};
-use shardio::{Compressor, ShardReader, ShardWriter, UnsortedShardReader};
+use shardio::{ShardReader, ShardWriter, UnsortedShardReader};
 
 #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, PartialOrd, Ord)]
 struct T1 {

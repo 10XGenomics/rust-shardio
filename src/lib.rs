@@ -101,7 +101,7 @@ use std::thread;
 
 use anyhow::{format_err, Error};
 use bincode::{deserialize_from, serialize_into};
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::warn;
 use min_max_heap::MinMaxHeap;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -630,7 +630,9 @@ where
         self.file.seek(SeekFrom::Start(
             (index_block_position + index_block_size) as u64,
         ))?;
-        self.file.write_u64::<BigEndian>(self.compressor.to_id())?;
+        self.file
+            .write_u32::<LittleEndian>(self.compressor.to_magic_number())?;
+        self.file.write_u32::<BigEndian>(0)?;
         self.file
             .write_u64::<BigEndian>(index_block_position as u64)?;
         self.file.write_u64::<BigEndian>(index_block_size as u64)?;
@@ -825,7 +827,10 @@ where
     /// Read shard index
     fn read_index_block(mut file: File) -> Result<(ShardRecordVec<T, S>, Compressor, File), Error> {
         let _ = file.seek(SeekFrom::End(-24))?;
-        let compressor = Compressor::from_id(file.read_u64::<BigEndian>()?)?;
+        let compressor = Compressor::from_magic_number(file.read_u32::<LittleEndian>()?)?;
+        // Next 32 bits are unused, reserved for future compression use.
+        let _reserved_compressor_level = file.read_u32::<BigEndian>()?;
+
         let index_block_position = file.read_u64::<BigEndian>()?;
         let _ = file.read_u64::<BigEndian>()?;
         file.seek(SeekFrom::Start(index_block_position))?;
