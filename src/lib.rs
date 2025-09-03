@@ -822,9 +822,8 @@ where
         // ? sizeof(T)
         // + 8 usize items_remaining
         // + 8 &bincode::Config
-        // + 8KB BufReader
         // + whatever the decompressor needs
-        8 + 8 + 8_192 + self.compressor.decompressor_mem_size_bytes()
+        8 + 8 + self.compressor.decompressor_mem_size_bytes()
     }
 
     /// Return an iterator over the items in the given `range` of keys.
@@ -869,7 +868,6 @@ where
 }
 
 use std::borrow::Borrow;
-use std::io::BufReader;
 use std::io::Read;
 struct ReadAdapter<T: Borrow<F>, F: FileExt> {
     file: T,
@@ -909,7 +907,7 @@ where
     S: SortKey<T>,
 {
     next_item: Option<(T, S::Key)>,
-    decoder: Decoder<BufReader<ReadAdapter<&'a File, File>>>,
+    decoder: Decoder<ReadAdapter<&'a File, File>>,
     items_remaining: usize,
     phantom_s: PhantomData<S>,
 }
@@ -924,9 +922,10 @@ where
         reader: &'a ShardReaderSingle<T, S>,
         rec: ShardRecord<<S as SortKey<T>>::Key>,
     ) -> Result<Self, Error> {
-        let mut decompressed_reader = reader.compressor.decoder(BufReader::new(
-            ReadAdapter::new(&reader.file, rec.offset, rec.len_bytes),
-        ))?;
+        let mut decompressed_reader =
+            reader
+                .compressor
+                .decoder(ReadAdapter::new(&reader.file, rec.offset, rec.len_bytes))?;
 
         let first_item: T = deserialize_from(&mut decompressed_reader)?;
         let first_key = S::sort_key(&first_item).into_owned();

@@ -6,9 +6,10 @@
 //! future through the use of a compile-time plugin registry system like the
 //! inventory crate.
 
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 
 use anyhow::{bail, Result};
+use zstd::zstd_safe;
 
 /// The compressors supported by shardio.
 pub enum Compressor {
@@ -18,15 +19,21 @@ pub enum Compressor {
     /// http://quixdb.github.io/squash-benchmark/#ratio-vs-compression
     /// important note: lz4f (not lz4) is the relevant mode in those charts.
     Lz4,
+    /// zstd compression using --fast=1
+    /// Roughly the same speed as lz4 level 2 but possibly 40% smaller for certain
+    /// workloads.
+    Zstd,
 }
 
 impl Compressor {
     const LZ4_ID: &'static [u8; 8] = b"lz4     ";
+    const ZSTD_ID: &'static [u8; 8] = b"zstd    ";
 
     /// Return a fixed-width identifier for this compressor, for encoding into a shard file.
     pub fn to_id(&self) -> u64 {
         match self {
             Self::Lz4 => u64::from_be_bytes(*Self::LZ4_ID),
+            Self::Zstd => u64::from_be_bytes(*Self::ZSTD_ID),
         }
     }
 
@@ -34,6 +41,7 @@ impl Compressor {
     pub fn from_id(id: u64) -> Result<Self> {
         match &id.to_be_bytes() {
             Self::LZ4_ID => Ok(Self::Lz4),
+            Self::ZSTD_ID => Ok(Self::Zstd),
             unknown => bail!("unknown compressor: {unknown:?}"),
         }
     }
@@ -41,11 +49,15 @@ impl Compressor {
     /// Return the amount of memory in bytes used by an instance of this decompressor.
     pub fn decompressor_mem_size_bytes(&self) -> usize {
         match self {
-            // 32KB of lz4-rs internal buffer
+            // 8KB BufReader
+            // + 32KB of lz4-rs internal buffer
             // + 64KB of lz4-sys default blockSize (x2)
             // + 128KB lz4-sys default blockLinked
             // + 4 lz4-sys checksum
-            Self::Lz4 => 32_768 + 65_536 * 2 + 131_072 + 4,
+            Self::Lz4 => 8192 + 32_768 + 65_536 * 2 + 131_072 + 4,
+            // Whatever zstd's buffer size is,
+            // FIXME there's gotta be more in there
+            Self::Zstd => zstd_safe::DCtx::in_size(),
         }
     }
 
@@ -58,28 +70,37 @@ impl Compressor {
                 encoder.write_all(data)?;
                 let (_, result) = encoder.finish();
                 result?;
-                Ok(())
+            }
+            Self::Zstd => {
+                let mut encoder = zstd::Encoder::new(w, -1)?;
+                encoder.write_all(data)?;
+                encoder.finish()?;
             }
         }
+        Ok(())
     }
 
     /// Create a decoder for this compressor, wrapping the provided reader.
+    /// This decoder should handle input buffering.
     pub fn decoder<R: Read>(&self, r: R) -> Result<Decoder<R>> {
-        match self {
-            Self::Lz4 => Ok(Decoder::Lz4(lz4::Decoder::new(r)?)),
-        }
+        Ok(match self {
+            Self::Lz4 => Decoder::Lz4(lz4::Decoder::new(BufReader::new(r))?),
+            Self::Zstd => Decoder::Zstd(zstd::Decoder::new(r)?),
+        })
     }
 }
 
 /// Wrap up decoding using different compression strategies.
 pub enum Decoder<R: Read> {
-    Lz4(lz4::Decoder<R>),
+    Lz4(lz4::Decoder<BufReader<R>>),
+    Zstd(zstd::Decoder<'static, BufReader<R>>),
 }
 
 impl<R: Read> Read for Decoder<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
             Self::Lz4(d) => d.read(buf),
+            Self::Zstd(d) => d.read(buf),
         }
     }
 }
