@@ -91,7 +91,7 @@ use std::any::type_name;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
 use std::ops::DerefMut;
 use std::os::unix::fs::FileExt;
@@ -101,7 +101,7 @@ use std::thread;
 
 use anyhow::{format_err, Error};
 use bincode::{deserialize_from, serialize_into};
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use log::warn;
 use min_max_heap::MinMaxHeap;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -630,8 +630,10 @@ where
         self.file.seek(SeekFrom::Start(
             (index_block_position + index_block_size) as u64,
         ))?;
-        self.file
-            .write_u32::<LittleEndian>(self.compressor.to_magic_number())?;
+        let magic_number = self.compressor.to_magic_number();
+        assert_eq!(4, magic_number.len());
+        self.file.write_all(&magic_number)?;
+        // Placeholder for future additional compressor metadata.
         self.file.write_u32::<BigEndian>(0)?;
         self.file
             .write_u64::<BigEndian>(index_block_position as u64)?;
@@ -827,7 +829,7 @@ where
     /// Read shard index
     fn read_index_block(mut file: File) -> Result<(ShardRecordVec<T, S>, Compressor, File), Error> {
         let _ = file.seek(SeekFrom::End(-24))?;
-        let compressor = Compressor::from_magic_number(file.read_u32::<LittleEndian>()?)?;
+        let compressor = Compressor::from_magic_number(&mut file)?;
         // Next 32 bits are unused, reserved for future compression use.
         let _reserved_compressor_level = file.read_u32::<BigEndian>()?;
 

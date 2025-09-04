@@ -26,21 +26,25 @@ pub enum Compressor {
     Zstd,
 }
 
+pub type MagicNumber = [u8; 4];
+
 impl Compressor {
-    const LZ4_MAGIC_NUMBER: u32 = 0x184D2204;
-    const ZSTD_MAGIC_NUMBER: u32 = 0xFD2FB528;
+    const LZ4_MAGIC_NUMBER: &'static MagicNumber = b"\x18\x4D\x22\x04";
+    const ZSTD_MAGIC_NUMBER: &'static MagicNumber = b"\xFD\x2F\xB5\x28";
 
     /// Return a fixed-width identifier for this compressor, for encoding into a shard file.
-    pub fn to_magic_number(&self) -> u32 {
+    pub fn to_magic_number(&self) -> MagicNumber {
         match self {
-            Self::Lz4 => Self::LZ4_MAGIC_NUMBER,
-            Self::Zstd => Self::ZSTD_MAGIC_NUMBER,
+            Self::Lz4 => *Self::LZ4_MAGIC_NUMBER,
+            Self::Zstd => *Self::ZSTD_MAGIC_NUMBER,
         }
     }
 
-    /// Match a fixed-width identifier to a known compressor.
-    pub fn from_magic_number(id: u32) -> Result<Self> {
-        match id {
+    /// Read a magic number from a reader and match it to a known compressor.
+    pub fn from_magic_number(mut r: impl Read) -> Result<Self> {
+        let mut id = [0u8; 4];
+        r.read_exact(&mut id)?;
+        match &id {
             Self::LZ4_MAGIC_NUMBER => Ok(Self::Lz4),
             Self::ZSTD_MAGIC_NUMBER => Ok(Self::Zstd),
             unknown => bail!("unknown compressor: {unknown:?}"),
