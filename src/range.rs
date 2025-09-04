@@ -57,8 +57,8 @@ impl<K: Ord + Clone> Range<K> {
     #[inline]
     /// Test if `point` in contained in the range `self`
     pub fn contains(&self, point: &K) -> bool {
-        let after_start = self.start.as_ref().map_or(true, |s| point >= s);
-        let before_end = self.end.as_ref().map_or(true, |e| point < e);
+        let after_start = self.start.as_ref().is_none_or(|s| point >= s);
+        let before_end = self.end.as_ref().is_none_or(|e| point < e);
         after_start && before_end
     }
 
@@ -90,7 +90,7 @@ impl<K: Ord + Clone> Range<K> {
     pub(crate) fn cmp(&self, point: &K) -> Rorder {
         if self.contains(point) {
             Rorder::Intersects
-        } else if self.start.as_ref().map_or(false, |s| point < s) {
+        } else if self.start.as_ref().is_some_and(|s| point < s) {
             Rorder::Before
         } else {
             Rorder::After

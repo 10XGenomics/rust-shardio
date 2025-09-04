@@ -3,12 +3,13 @@ use bincode::deserialize_from;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::cmp::min;
 use std::fs::File;
-use std::io::BufReader;
 use std::marker::PhantomData;
 
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::compress::Decoder;
+use crate::Compressor;
 use crate::DefaultSort;
 use crate::ReadAdapter;
 use crate::ShardReaderSingle;
@@ -196,7 +197,11 @@ where
         };
         Ok(Some(Self {
             count,
-            shard_iter: Some(UnsortedShardIter::new(reader.file, first_index_entry)?),
+            shard_iter: Some(UnsortedShardIter::new(
+                reader.file,
+                first_index_entry,
+                reader.compressor,
+            )?),
             file_index_iter: Box::new(file_index_iter),
             phantom: Default::default(),
         }))
@@ -265,7 +270,7 @@ where
 
 /// A direct iterator over the items in a single shard in a single file.
 struct UnsortedShardIter<T> {
-    decoder: lz4::Decoder<BufReader<ReadAdapter<File, File>>>,
+    decoder: Decoder<ReadAdapter<File, File>>,
     items_remaining: usize,
     phantom_s: PhantomData<T>,
 }
@@ -274,21 +279,21 @@ impl<T> UnsortedShardIter<T>
 where
     T: DeserializeOwned,
 {
-    pub(crate) fn new(file: File, rec: KeylessShardRecord) -> Result<Self, Error> {
+    pub(crate) fn new(
+        file: File,
+        rec: KeylessShardRecord,
+        compressor: Compressor,
+    ) -> Result<Self, Error> {
         Ok(Self {
-            decoder: lz4::Decoder::new(BufReader::new(ReadAdapter::new(
-                file,
-                rec.offset,
-                rec.len_bytes,
-            )))?,
+            decoder: compressor.decoder(ReadAdapter::new(file, rec.offset, rec.len_bytes))?,
             items_remaining: rec.len_items,
             phantom_s: PhantomData,
         })
     }
 
     pub(crate) fn reset(self, rec: KeylessShardRecord) -> Result<Self, Error> {
-        let (buf, _) = self.decoder.finish();
-        Self::new(buf.into_inner().file, rec)
+        let (read_adapter, compressor) = self.decoder.finish();
+        Self::new(read_adapter.file, rec, compressor)
     }
 
     /// Return the next item in the iterator.
