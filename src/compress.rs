@@ -31,6 +31,7 @@ pub type MagicNumber = [u8; 4];
 impl Compressor {
     const LZ4_MAGIC_NUMBER: &'static MagicNumber = b"\x18\x4D\x22\x04";
     const ZSTD_MAGIC_NUMBER: &'static MagicNumber = b"\xFD\x2F\xB5\x28";
+    const ZSTD_COMPRESSION_LEVEL: i32 = -1;
 
     /// Return a fixed-width identifier for this compressor, for encoding into a shard file.
     pub fn to_magic_number(&self) -> MagicNumber {
@@ -60,9 +61,17 @@ impl Compressor {
             // + 128KB lz4-sys default blockLinked
             // + 4 lz4-sys checksum
             Self::Lz4 => 8192 + 32_768 + 65_536 * 2 + 131_072 + 4,
-            // Whatever zstd's buffer size is,
-            // FIXME there's gotta be more in there
-            Self::Zstd => zstd_safe::DCtx::in_size(),
+            Self::Zstd => {
+                // Safety: only unsafe due to FFI
+                let window_log = unsafe {
+                    zstd_sys::ZSTD_getCParams(Self::ZSTD_COMPRESSION_LEVEL, 0, 0).windowLog as u32
+                };
+                let window_size = 1usize << window_log;
+                // Safety: only unsafe due to FFI
+                let zstd_internal_size = unsafe { zstd_sys::ZSTD_estimateDStreamSize(window_size) };
+                let rust_read_buf_size = zstd_safe::DCtx::in_size();
+                zstd_internal_size + rust_read_buf_size
+            }
         }
     }
 
@@ -77,7 +86,7 @@ impl Compressor {
                 result?;
             }
             Self::Zstd => {
-                let mut encoder = zstd::Encoder::new(w, -1)?;
+                let mut encoder = zstd::Encoder::new(w, Self::ZSTD_COMPRESSION_LEVEL)?;
                 encoder.write_all(data)?;
                 encoder.finish()?;
             }
@@ -124,5 +133,18 @@ impl<R: Read> Decoder<R> {
             }
             Self::Zstd(d) => (d.finish().into_inner(), Compressor::Zstd),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Compressor;
+
+    /// This test mostly serves as documentation for the actual memory overhead
+    /// of the two compressors.
+    #[test]
+    fn test_decompressor_mem_size() {
+        assert_eq!(1144627, Compressor::Zstd.decompressor_mem_size_bytes());
+        assert_eq!(303108, Compressor::Lz4.decompressor_mem_size_bytes());
     }
 }
