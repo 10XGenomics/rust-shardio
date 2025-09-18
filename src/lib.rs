@@ -579,7 +579,9 @@ where
         })
     }
 
-    fn write_chunk(&mut self, items: &[T]) -> Result<(), Error> {
+    /// Write a single chunk of items into this shard file.
+    /// This includes an entry into the in-memory index.
+    pub fn write_chunk(&mut self, items: &[T]) -> Result<(), Error> {
         self.serialize_buffer.clear();
         self.compress_buffer.clear();
 
