@@ -121,8 +121,10 @@ pub use compress::Compressor;
 
 mod unsorted;
 pub use unsorted::*;
-// #[cfg(feature = "parallel")]
+#[cfg(any(feature = "parallel", test))]
 mod par_compress;
+#[cfg(feature = "parallel")]
+pub use par_compress::process_sorted_bufs;
 
 // this number is chosen such that, for the expected size of a ShardIter using lz4,
 //   represents at least 1GiB of memory (1024^3 / 303124 =~ 3542.3)
@@ -1467,6 +1469,8 @@ const fn assert_readers_are_sync() {
 
 #[cfg(test)]
 mod shard_tests {
+    use crate::par_compress::process_sorted_bufs;
+
     use super::*;
     use is_sorted::IsSorted;
     use pretty_assertions::assert_eq;
@@ -1793,24 +1797,20 @@ mod shard_tests {
         buffer_size: usize,
         n_items: usize,
     ) {
-        check_round_trip_opt(
-            disk_chunk_size,
-            producer_chunk_size,
-            buffer_size,
-            n_items,
-            true,
-            Compressor::Lz4,
-        )
-        .unwrap();
-        check_round_trip_opt(
-            disk_chunk_size,
-            producer_chunk_size,
-            buffer_size,
-            n_items,
-            true,
-            Compressor::Zstd,
-        )
-        .unwrap();
+        for compressor in [Compressor::Lz4, Compressor::Zstd] {
+            for do_parallel in [false, true] {
+                check_round_trip_opt(
+                    disk_chunk_size,
+                    producer_chunk_size,
+                    buffer_size,
+                    n_items,
+                    true,
+                    compressor,
+                    do_parallel,
+                )
+                .unwrap();
+            }
+        }
     }
 
     struct ThreadSender<T, S> {
@@ -1864,6 +1864,7 @@ mod shard_tests {
         n_items: usize,
         do_read: bool,
         compressor: Compressor,
+        do_parallel: bool,
     ) -> Result<(), Error> {
         println!(
             "test round trip: disk_chunk_size: {}, producer_chunk_size: {}, n_items: {}",
@@ -1875,21 +1876,46 @@ mod shard_tests {
         let create = || -> Result<_, Error> {
             let tmp = tempfile::NamedTempFile::new()?;
 
-            // Write and close file
-            let mut writer: ShardWriter<T1> = ShardWriter::with_compressor(
-                tmp.path(),
-                producer_chunk_size,
-                disk_chunk_size,
-                buffer_size,
-                compressor,
-            )?;
-
             let mut g = Gen::new(10);
             let send_chunks = rand_item_chunks(4, n_items / 4, &mut g);
-            let mut true_items = ThreadSender::send_from_threads(send_chunks, writer.get_sender())?;
 
-            writer.finish()?;
+            // Write and close file
+            let mut true_items = if do_parallel {
+                let true_items: Vec<_> = send_chunks.into_iter().flatten().collect();
+
+                let sorted_bufs: Vec<_> = true_items
+                    .chunks(buffer_size)
+                    .map(|chunk| {
+                        let mut chunk = chunk.to_vec();
+                        chunk.sort();
+                        chunk
+                    })
+                    .collect();
+
+                process_sorted_bufs::<T1, DefaultSort>(
+                    sorted_bufs.into_iter(),
+                    disk_chunk_size,
+                    2,
+                    compressor,
+                    tmp.path(),
+                )?;
+                true_items
+            } else {
+                let mut writer: ShardWriter<T1> = ShardWriter::with_compressor(
+                    tmp.path(),
+                    producer_chunk_size,
+                    disk_chunk_size,
+                    buffer_size,
+                    compressor,
+                )?;
+
+                let true_items = ThreadSender::send_from_threads(send_chunks, writer.get_sender())?;
+
+                writer.finish()?;
+                true_items
+            };
             true_items.sort();
+
             Ok((tmp, true_items))
         };
 

@@ -14,8 +14,16 @@ use serde::Serialize;
 
 use crate::{write_index, Compressor, ShardRecord, SortKey, INITIAL_WRITE_CURSOR_OFFSET};
 
-fn process_sorted_bufs<T, S>(
-    recv: impl Iterator<Item = Vec<T>> + 'static,
+/// Process an iterator of sorted buffers into a shard file.
+///
+/// Each buffer is split up into chunks of maximum size chunk_size.
+/// Serialization/compression are delegated to a thread pool of size worker_count.
+///
+/// The function returns when the input iterator has been fully consumed, all
+/// chunks have been written, the shard index has been written, and the file
+/// closed.
+pub fn process_sorted_bufs<T, S>(
+    sorted_buf_iter: impl Iterator<Item = Vec<T>> + 'static,
     chunk_size: usize,
     worker_count: usize,
     compressor: Compressor,
@@ -30,17 +38,22 @@ where
 
     let mut file = File::create(path).with_context(|| path.to_string_lossy().to_string())?;
 
-    let mut regions = vec![];
+    let mut shard_index = vec![];
 
-    let compress_pool = MemPool::new(worker_count * 2, Vec::new);
+    // Current write location in the file.
     let mut cursor = INITIAL_WRITE_CURSOR_OFFSET;
 
     // NOTE: parallel_map_custom clones this for each worker thread.
     // We actually have worker_count number of these.
     let mut serialize_buf = vec![];
 
-    for result in recv
+    // A cross-thread memory pool of buffers to write compressed data into.
+    let compress_pool = MemPool::new(1 + worker_count * 2, Vec::new);
+
+    for result in sorted_buf_iter
         .flat_map(move |buf| {
+            // Break up the input buffer into chunks by ranges, sharing access
+            // to the input via Arc.
             let buf_len = buf.len();
             let chunks = (0..buf_len)
                 .step_by(chunk_size)
@@ -48,7 +61,10 @@ where
             let wrapped = Arc::new(buf);
             chunks.map(move |chunk_range| (wrapped.clone(), chunk_range))
         })
+        // Inject the buffer to use for compression of this chunk.
         .map(move |(buf, chunk_range)| (buf, chunk_range, compress_pool.fetch()))
+        // Spread serialization/compression across worker pool.
+        // This preserves order of the input chunks.
         .parallel_map_custom(
             |o| o.threads(worker_count),
             move |(buf, chunk_range, mut compress_buf)| {
@@ -78,14 +94,16 @@ where
             },
         )
     {
+        // Write the compressed buffer into the file, and update the index.
         let (compressed_buf, mut shard_record) = result?;
         shard_record.offset = cursor;
-        regions.push(shard_record);
+        shard_index.push(shard_record);
         let cur_offset = cursor;
         cursor += compressed_buf.len();
         file.write_all_at(&compressed_buf, cur_offset as u64)?;
     }
-    write_index::<T, S, <S as SortKey<T>>::Key>(&mut file, cursor, &regions, compressor)?;
+    // Finalize by writing the shard index into the file.
+    write_index::<T, S, <S as SortKey<T>>::Key>(&mut file, cursor, &shard_index, compressor)?;
     Ok(())
 }
 
@@ -95,7 +113,7 @@ where
 ///
 /// The pool will never allocate more than the specified number of members,
 /// and requesting a member from the pool will block until one is available.
-pub struct MemPool<T: Send> {
+struct MemPool<T: Send> {
     recv: Receiver<T>,
     load: SyncSender<T>,
 }
@@ -121,7 +139,7 @@ impl<T: Send> MemPool<T> {
 }
 
 /// A value of type T that will be returned to the source memory pool when dropped.
-pub struct PoolMember<T: Send> {
+struct PoolMember<T: Send> {
     val: Option<T>,
     return_to_pool: SyncSender<T>,
 }

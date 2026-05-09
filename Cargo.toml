@@ -40,6 +40,7 @@ quickcheck = "1.0"
 pretty_assertions = "1.0.0"
 rand = "^0.8"
 is_sorted = "0.1"
+pariter = "0.5"
 
 [[bench]]
 name = "my_bench"
