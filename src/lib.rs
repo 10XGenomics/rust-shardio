@@ -1786,7 +1786,7 @@ mod shard_tests {
         }
 
         QuickCheck::new()
-            .set_rng(Gen::new(500000))
+            .rng(Gen::new(500000))
             .tests(4)
             .quickcheck(check_t1 as fn(MultiSlice<T1>) -> bool);
     }
