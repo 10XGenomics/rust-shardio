@@ -12,9 +12,11 @@ readme = "README.md"
 include = ["src/**/*", "LICENSE", "README.md"]
 
 [features]
+default = ["parallel"]
 # Switch on the 'full-test' feature (in release mode), to enable 
 # some long-running stress-tests
 full-test = []
+parallel = ["dep:pariter"]
 
 [dependencies]
 bincode = "1.3"
@@ -27,16 +29,18 @@ crossbeam-channel = ">=0.4, <=0.6"
 log = "^0.4"
 zstd = "0.13.3"
 zstd-sys = { version = "2", default-features = false, features = ["experimental"] }
+pariter = { version = "0.6", optional = true }
 
 [dev-dependencies]
 tempfile = "^3.1"
 criterion = "0.4"
 fxhash = "0.2.1"
 lazy_static = "1.2"
-quickcheck = "1.0"
+quickcheck = "1.1"
 pretty_assertions = "1.0.0"
 rand = "^0.8"
 is_sorted = "0.1"
+pariter = "0.6"
 
 [[bench]]
 name = "my_bench"

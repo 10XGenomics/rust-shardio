@@ -121,6 +121,10 @@ pub use compress::Compressor;
 
 mod unsorted;
 pub use unsorted::*;
+#[cfg(any(feature = "parallel", test))]
+mod par_compress;
+#[cfg(feature = "parallel")]
+pub use par_compress::process_sorted_bufs;
 
 // this number is chosen such that, for the expected size of a ShardIter using lz4,
 //   represents at least 1GiB of memory (1024^3 / 303124 =~ 3542.3)
@@ -554,6 +558,8 @@ where
     }
 }
 
+const INITIAL_WRITE_CURSOR_OFFSET: usize = 4096;
+
 impl<T, S> SortAndWriteHandler<T, S>
 where
     T: Send + Serialize,
@@ -569,7 +575,7 @@ where
         let file = File::create(path)?;
 
         Ok(SortAndWriteHandler {
-            cursor: 4096,
+            cursor: INITIAL_WRITE_CURSOR_OFFSET,
             regions: Vec::new(),
             file,
             serialize_buffer: Vec::new(),
@@ -616,30 +622,42 @@ where
 
     /// Write out the shard positioning data and which compressor is in use.
     pub fn write_index(&mut self) -> Result<(), Error> {
-        let mut buf = Vec::new();
-
-        serialize_into(&mut buf, &(type_name::<T>(), type_name::<S>()))?;
-        serialize_into(&mut buf, &self.regions)?;
-
-        let index_block_position = self.cursor;
-        let index_block_size = buf.len();
-
-        self.file
-            .write_all_at(buf.as_slice(), index_block_position as u64)?;
-
-        self.file.seek(SeekFrom::Start(
-            (index_block_position + index_block_size) as u64,
-        ))?;
-        let magic_number = self.compressor.to_magic_number();
-        assert_eq!(4, magic_number.len());
-        self.file.write_all(&magic_number)?;
-        // Placeholder for future additional compressor metadata.
-        self.file.write_u32::<BigEndian>(0)?;
-        self.file
-            .write_u64::<BigEndian>(index_block_position as u64)?;
-        self.file.write_u64::<BigEndian>(index_block_size as u64)?;
-        Ok(())
+        write_index::<T, S, <S as SortKey<T>>::Key>(
+            &mut self.file,
+            self.cursor,
+            &self.regions,
+            self.compressor,
+        )
     }
+}
+
+/// Write out the shard positioning data and which compressor is in use.
+fn write_index<T, S, K: Serialize>(
+    file: &mut File,
+    index_block_position: usize,
+    regions: &[ShardRecord<K>],
+    compressor: Compressor,
+) -> Result<(), Error> {
+    let mut buf = Vec::new();
+
+    serialize_into(&mut buf, &(type_name::<T>(), type_name::<S>()))?;
+    serialize_into(&mut buf, regions)?;
+
+    let index_block_size = buf.len();
+
+    file.write_all_at(buf.as_slice(), index_block_position as u64)?;
+
+    file.seek(SeekFrom::Start(
+        (index_block_position + index_block_size) as u64,
+    ))?;
+    let magic_number = compressor.to_magic_number();
+    assert_eq!(4, magic_number.len());
+    file.write_all(&magic_number)?;
+    // Placeholder for future additional compressor metadata.
+    file.write_u32::<BigEndian>(0)?;
+    file.write_u64::<BigEndian>(index_block_position as u64)?;
+    file.write_u64::<BigEndian>(index_block_size as u64)?;
+    Ok(())
 }
 
 /// Sort buffered items, break large buffer into chunks.
@@ -1451,6 +1469,8 @@ const fn assert_readers_are_sync() {
 
 #[cfg(test)]
 mod shard_tests {
+    use crate::par_compress::process_sorted_bufs;
+
     use super::*;
     use is_sorted::IsSorted;
     use pretty_assertions::assert_eq;
@@ -1766,7 +1786,7 @@ mod shard_tests {
         }
 
         QuickCheck::new()
-            .gen(Gen::new(500000))
+            .rng(Gen::new(500000))
             .tests(4)
             .quickcheck(check_t1 as fn(MultiSlice<T1>) -> bool);
     }
@@ -1777,24 +1797,20 @@ mod shard_tests {
         buffer_size: usize,
         n_items: usize,
     ) {
-        check_round_trip_opt(
-            disk_chunk_size,
-            producer_chunk_size,
-            buffer_size,
-            n_items,
-            true,
-            Compressor::Lz4,
-        )
-        .unwrap();
-        check_round_trip_opt(
-            disk_chunk_size,
-            producer_chunk_size,
-            buffer_size,
-            n_items,
-            true,
-            Compressor::Zstd,
-        )
-        .unwrap();
+        for compressor in [Compressor::Lz4, Compressor::Zstd] {
+            for do_parallel in [false, true] {
+                check_round_trip_opt(
+                    disk_chunk_size,
+                    producer_chunk_size,
+                    buffer_size,
+                    n_items,
+                    true,
+                    compressor,
+                    do_parallel,
+                )
+                .unwrap();
+            }
+        }
     }
 
     struct ThreadSender<T, S> {
@@ -1848,6 +1864,7 @@ mod shard_tests {
         n_items: usize,
         do_read: bool,
         compressor: Compressor,
+        do_parallel: bool,
     ) -> Result<(), Error> {
         println!(
             "test round trip: disk_chunk_size: {}, producer_chunk_size: {}, n_items: {}",
@@ -1859,21 +1876,46 @@ mod shard_tests {
         let create = || -> Result<_, Error> {
             let tmp = tempfile::NamedTempFile::new()?;
 
-            // Write and close file
-            let mut writer: ShardWriter<T1> = ShardWriter::with_compressor(
-                tmp.path(),
-                producer_chunk_size,
-                disk_chunk_size,
-                buffer_size,
-                compressor,
-            )?;
-
             let mut g = Gen::new(10);
             let send_chunks = rand_item_chunks(4, n_items / 4, &mut g);
-            let mut true_items = ThreadSender::send_from_threads(send_chunks, writer.get_sender())?;
 
-            writer.finish()?;
+            // Write and close file
+            let mut true_items = if do_parallel {
+                let true_items: Vec<_> = send_chunks.into_iter().flatten().collect();
+
+                let sorted_bufs: Vec<_> = true_items
+                    .chunks(buffer_size)
+                    .map(|chunk| {
+                        let mut chunk = chunk.to_vec();
+                        chunk.sort();
+                        chunk
+                    })
+                    .collect();
+
+                process_sorted_bufs::<T1, DefaultSort>(
+                    sorted_bufs.into_iter(),
+                    disk_chunk_size,
+                    2,
+                    compressor,
+                    tmp.path(),
+                )?;
+                true_items
+            } else {
+                let mut writer: ShardWriter<T1> = ShardWriter::with_compressor(
+                    tmp.path(),
+                    producer_chunk_size,
+                    disk_chunk_size,
+                    buffer_size,
+                    compressor,
+                )?;
+
+                let true_items = ThreadSender::send_from_threads(send_chunks, writer.get_sender())?;
+
+                writer.finish()?;
+                true_items
+            };
             true_items.sort();
+
             Ok((tmp, true_items))
         };
 
