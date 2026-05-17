@@ -38,7 +38,7 @@ fxhash = "0.2.1"
 lazy_static = "1.2"
 quickcheck = "1.1"
 pretty_assertions = "1.0.0"
-rand = "^0.8"
+rand = "^0.10"
 is_sorted = "0.1"
 pariter = "0.6"
 
