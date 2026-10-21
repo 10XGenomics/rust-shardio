@@ -72,18 +72,10 @@ impl<K: Ord + Clone> Range<K> {
     #[inline]
     /// Test if Range `other` intersects Range `self`
     pub(crate) fn intersects_shard(&self, shard: &ShardRecord<K>) -> bool {
-        self.start < Some(shard.start_key.clone())
-            && Range::se_lt(&Some(shard.start_key.clone()), &self.end)
-            || self.start >= Some(shard.start_key.clone())
-                && Range::shard_le(&self.start, &shard.end_key)
-    }
-
-    // is `start` position s1 less then inclusive `end` position e2
-    #[inline]
-    fn shard_le(inclusive_start: &Option<K>, inclusive_end: &K) -> bool {
-        match (inclusive_start, inclusive_end) {
-            (Some(v1), v2) => v1 <= v2,
-            (&None, _) => true,
+        // Compare by reference: cloning keys here would allocate for every index record scanned.
+        match &self.start {
+            Some(start) if start >= &shard.start_key => start <= &shard.end_key,
+            _ => self.end.as_ref().is_none_or(|end| &shard.start_key < end),
         }
     }
 
@@ -188,5 +180,39 @@ mod range_tests {
         let p = 10;
         let r1 = Range::ends_at(8);
         assert_eq!(r1.cmp(&p), Rorder::After);
+    }
+
+    #[test]
+    fn test_intersects_shard_matches_contains() {
+        // Matches the previous implementation everywhere, and for non-empty ranges a shard
+        // [start_key, end_key] intersects exactly when some key in it is contained in the range.
+        let bounds = [None, Some(0), Some(2), Some(3), Some(5), Some(7)];
+        for &start in &bounds {
+            for &end in &bounds {
+                let range = Range { start, end };
+                for start_key in 0..7 {
+                    for end_key in start_key..7 {
+                        let shard = ShardRecord {
+                            start_key,
+                            end_key,
+                            offset: 0,
+                            len_bytes: 0,
+                            len_items: 0,
+                        };
+                        // The previous implementation, which cloned the keys.
+                        let previous = start < Some(start_key)
+                            && Range::se_lt(&Some(start_key), &end)
+                            || start >= Some(start_key) && start.is_none_or(|s| s <= end_key);
+                        let actual = range.intersects_shard(&shard);
+                        assert_eq!(actual, previous, "{range:?} {start_key}..={end_key}");
+
+                        if start.zip(end).is_none_or(|(s, e)| s < e) {
+                            let expected = (start_key..=end_key).any(|k| range.contains(&k));
+                            assert_eq!(actual, expected, "{range:?} {start_key}..={end_key}");
+                        }
+                    }
+                }
+            }
+        }
     }
 }
