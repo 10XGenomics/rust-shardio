@@ -1964,7 +1964,7 @@ mod shard_tests {
         for f in &files {
             write_t1_file(f.path(), &rand_items(1 << 12, &mut g), 32, 1 << 9)?;
         }
-        let paths: Vec<&Path> = files.iter().map(|f| f.path()).collect();
+        let paths: Vec<&Path> = files.iter().map(tempfile::NamedTempFile::path).collect();
 
         for num_chunks in [1, 3, 10] {
             check_memory_estimate(&paths, num_chunks)?;
@@ -1981,7 +1981,7 @@ mod shard_tests {
         for f in &files {
             write_t1_file(f.path(), &rand_items(1 << 12, &mut g), 32, 1 << 9)?;
         }
-        let paths: Vec<&Path> = files.iter().map(|f| f.path()).collect();
+        let paths: Vec<&Path> = files.iter().map(tempfile::NamedTempFile::path).collect();
         let set_reader = ShardReader::<T1>::open_set(&paths)?;
 
         for range in set_reader.make_chunks(5, &Range::all()) {
