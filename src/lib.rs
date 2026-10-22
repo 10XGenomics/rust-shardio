@@ -90,6 +90,7 @@
 use std::any::type_name;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
+use std::convert::TryFrom;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
@@ -121,6 +122,9 @@ pub use compress::Compressor;
 
 mod unsorted;
 pub use unsorted::*;
+
+mod memory;
+pub use memory::MemoryEstimate;
 #[cfg(any(feature = "parallel", test))]
 mod par_compress;
 #[cfg(feature = "parallel")]
@@ -834,7 +838,9 @@ where
         let f = File::open(path)?;
 
         let (mut index, compressor, f) = Self::read_index_block(f)?;
-        index.sort();
+        // Records are totally ordered (no two share an offset), so an unstable sort gives the same
+        // order as a stable one without allocating a scratch buffer.
+        index.sort_unstable();
 
         Ok(ShardReaderSingle {
             file: f,
@@ -865,7 +871,29 @@ where
                 s_typ,
             ));
         }
-        let recs = deserialize_from(&mut file)?;
+        // Read the record count bincode writes before the records and allocate the index once at
+        // its final size. Letting bincode grow the Vec would briefly need up to about twice the
+        // index's memory, which `ShardReader::memory_estimate` does not count.
+        let num_recs: u64 = deserialize_from(&mut file)?;
+        // Each record has at least three u64 fields, so a valid count fits in the bytes between
+        // here and the 24-byte footer. Check before allocating so a corrupt count is an error.
+        let records_bytes = file
+            .metadata()?
+            .len()
+            .saturating_sub(file.stream_position()? + 24);
+        let min_rec_bytes = 3 * size_of::<u64>() as u64;
+        if num_recs > records_bytes / min_rec_bytes {
+            return Err(format_err!(
+                "index claims {} records, but only {} bytes remain for them",
+                num_recs,
+                records_bytes
+            ));
+        }
+        let mut recs = Vec::new();
+        recs.try_reserve_exact(usize::try_from(num_recs)?)?;
+        for _ in 0..num_recs {
+            recs.push(deserialize_from(&mut file)?);
+        }
         Ok((recs, compressor, file))
     }
 
@@ -892,7 +920,7 @@ where
         &self,
         rec: &ShardRecord<<S as SortKey<T>>::Key>,
     ) -> Result<ShardIter<'_, T, S>, Error> {
-        ShardIter::new(self, rec.clone())
+        ShardIter::new(self, rec)
     }
 
     /// Total number of values held by this reader
@@ -973,7 +1001,7 @@ where
 {
     pub(crate) fn new(
         reader: &'a ShardReaderSingle<T, S>,
-        rec: ShardRecord<<S as SortKey<T>>::Key>,
+        rec: &ShardRecord<<S as SortKey<T>>::Key>,
     ) -> Result<Self, Error> {
         let mut decompressed_reader =
             reader
@@ -1080,17 +1108,21 @@ where
         reader: &'a ShardReaderSingle<T, S>,
         range: Range<<S as SortKey<T>>::Key>,
     ) -> Result<RangeIter<'a, T, S>, Error> {
-        let shards: Vec<&ShardRecord<_>> = reader
-            .index
-            .iter()
-            .filter(|x| range.intersects_shard(x))
-            .collect();
+        // Count the in-range shards first so the waiting heap is allocated once at its final size,
+        // which keeps its memory equal to what `ShardReader::memory_estimate` reports.
+        let mut num_shards: usize = 0;
+        let mut min_item = None;
+        for s in reader.index.iter().filter(|x| range.intersects_shard(x)) {
+            num_shards += 1;
+            if min_item.is_none_or(|m| &s.start_key < m) {
+                min_item = Some(&s.start_key);
+            }
+        }
 
-        let min_item = shards.iter().map(|x| &x.start_key).min();
         let mut active_queue = MinMaxHeap::new();
-        let mut waiting_queue = MinMaxHeap::new();
+        let mut waiting_queue = MinMaxHeap::with_capacity(num_shards.saturating_sub(1));
 
-        for s in shards {
+        for s in reader.index.iter().filter(|x| range.intersects_shard(x)) {
             if Some(&s.start_key) == min_item && active_queue.is_empty() {
                 active_queue.push(reader.iter_shard(s)?);
             } else {
@@ -1258,7 +1290,7 @@ where
     RangeIter<'a, T, S>: Iterator<Item = Result<T, Error>>,
 {
     fn new(mut iterators: Vec<RangeIter<'a, T, S>>) -> Result<MergeIterator<'a, T, S>, Error> {
-        let mut merge_heap = MinMaxHeap::new();
+        let mut merge_heap = MinMaxHeap::with_capacity(iterators.len());
 
         for (idx, itr) in iterators.iter_mut().enumerate() {
             let item = itr.next().transpose()?;
@@ -1368,7 +1400,7 @@ where
         &'a self,
         range: &Range<<S as SortKey<T>>::Key>,
     ) -> Result<MergeIterator<'a, T, S>, Error> {
-        let mut iters = Vec::new();
+        let mut iters = Vec::with_capacity(self.readers.len());
         for r in self.readers.iter() {
             let iter = r.iter_range(range)?;
             iters.push(iter);
@@ -1414,8 +1446,22 @@ where
 
         // Divide the known start locations into chunks, and
         // use setup start positions.
-        let chunk_starts = if starts.len() <= num_chunks {
-            starts.into_iter().map(Some).collect::<Vec<_>>()
+        // The first chunk always starts at `range.start`, not at the first start key: a block that
+        // starts before `range.start` can still hold items inside the range.
+        let chunk_starts = if starts.is_empty() {
+            let any_overlap = self
+                .readers
+                .iter()
+                .any(|r| r.index.iter().any(|block| range.intersects_shard(block)));
+            if any_overlap {
+                vec![range.start.clone()]
+            } else {
+                Vec::new()
+            }
+        } else if starts.len() <= num_chunks {
+            let mut chunk_starts = starts.into_iter().map(Some).collect::<Vec<_>>();
+            chunk_starts[0] = range.start.clone();
+            chunk_starts
         } else {
             let n = starts.len();
             (0..num_chunks)
@@ -1445,6 +1491,63 @@ where
         }
 
         chunks
+    }
+
+    /// Return an upper-bound estimate of the memory one process needs to open this reader's files
+    /// and iterate `range` in sorted order with [`iter_range`](Self::iter_range). `range` can be
+    /// any key range, not only one returned by [`make_chunks`](Self::make_chunks). The estimate is
+    /// computed from the file indexes only; no data is decompressed. Convert it to bytes with
+    /// [`MemoryEstimate::total_bytes`], and see [`MemoryEstimate`] for the memory model.
+    ///
+    /// Every term of the estimate is a sum over files, so the `total_bytes` of several readers
+    /// can be added. For example, a caller can open one file at a time to keep its own memory low
+    /// and add up the per-file totals, or add the totals of readers over different item types
+    /// that are iterated together.
+    pub fn memory_estimate(&self, range: &Range<<S as SortKey<T>>::Key>) -> MemoryEstimate {
+        let mut waiting_chunks = 0;
+        let mut max_open_chunks = 0;
+        for r in &self.readers {
+            let (open, in_range) = memory::open_chunks_bound(&r.index, range);
+            max_open_chunks += open;
+            waiting_chunks += in_range;
+        }
+
+        type Key<T, S> = <S as SortKey<T>>::Key;
+        MemoryEstimate {
+            files: self.readers.len(),
+            index_records: self.readers.iter().map(|r| r.index.len()).sum(),
+            waiting_chunks,
+            max_open_chunks,
+            range_bound_keys: usize::from(range.start.is_some()) + usize::from(range.end.is_some()),
+            index_record_fixed_bytes: size_of::<ShardRecord<Key<T, S>>>()
+                - 2 * size_of::<Key<T, S>>(),
+            file_fixed_bytes: size_of::<RangeIter<'_, T, S>>()
+                + size_of::<(SortableItem<Key<T, S>, T>, usize)>()
+                - size_of::<Key<T, S>>()
+                - size_of::<T>(),
+            decoder_bytes: self
+                .readers
+                .iter()
+                .map(ShardReaderSingle::shard_iter_size)
+                .max()
+                .unwrap_or(0),
+        }
+    }
+
+    /// Like [`make_chunks`](Self::make_chunks), but pairs each range with its
+    /// [`memory_estimate`](Self::memory_estimate).
+    pub fn make_chunks_with_memory_estimate(
+        &self,
+        num_chunks: usize,
+        range: &Range<<S as SortKey<T>>::Key>,
+    ) -> Vec<(Range<<S as SortKey<T>>::Key>, MemoryEstimate)> {
+        self.make_chunks(num_chunks, range)
+            .into_iter()
+            .map(|chunk| {
+                let estimate = self.memory_estimate(&chunk);
+                (chunk, estimate)
+            })
+            .collect()
     }
 
     /// Estimate an upper bound on the total number of values held by a range
@@ -1643,6 +1746,289 @@ mod shard_tests {
     fn test_shard_round_trip_big() {
         // Play with these settings to test perf.
         check_round_trip_opt(1024, 64, 1 << 18, 1 << 20, false).unwrap();
+    }
+
+    /// Replay `RangeIter::next` over one file and return the largest number of chunks that were
+    /// open at the same time.
+    fn observed_peak_open_chunks(
+        reader: &ShardReaderSingle<T1, DefaultSort>,
+        range: &Range<T1>,
+    ) -> Result<usize, Error> {
+        let mut iter = RangeIter::new(reader, *range)?;
+        let mut peak = iter.active_queue.len();
+        loop {
+            iter.activate_shards()?;
+            peak = peak.max(iter.active_queue.len());
+            match iter.next_active() {
+                Some(item) => {
+                    let item = item?;
+                    if iter.range.cmp(&item) == Rorder::After {
+                        break;
+                    }
+                }
+                None => break,
+            }
+        }
+        Ok(peak)
+    }
+
+    fn write_t1_file(
+        path: &Path,
+        items: &[T1],
+        disk_chunk_size: usize,
+        item_buffer_size: usize,
+    ) -> Result<(), Error> {
+        let sender_buffer_size = (item_buffer_size / 4).clamp(1, 16);
+        let mut writer: ShardWriter<T1> =
+            ShardWriter::new(path, sender_buffer_size, disk_chunk_size, item_buffer_size)?;
+        let mut sender = writer.get_sender();
+        for item in items {
+            sender.send(*item)?;
+        }
+        sender.finished()?;
+        drop(sender);
+        writer.finish()?;
+        Ok(())
+    }
+
+    /// Check that `make_chunks_with_memory_estimate` returns the same ranges as `make_chunks`,
+    /// that its fields match the reader, and that the open-chunk bound is never exceeded.
+    /// Returns (max bound, max observed) over all ranges, per file.
+    fn check_memory_estimate(paths: &[&Path], num_chunks: usize) -> Result<(usize, usize), Error> {
+        let reader = ShardReader::<T1>::open_set(paths)?;
+        let plan = reader.make_chunks_with_memory_estimate(num_chunks, &Range::all());
+        let ranges: Vec<_> = plan.iter().map(|(r, _)| *r).collect();
+        assert_eq!(ranges, reader.make_chunks(num_chunks, &Range::all()));
+
+        let index_records: usize = reader.readers.iter().map(|r| r.index.len()).sum();
+        let (mut max_bound, mut max_observed) = (0, 0);
+        for (range, est) in &plan {
+            assert_eq!(est.files, paths.len());
+            assert_eq!(est.index_records, index_records);
+            assert_eq!(est.decoder_bytes, reader.shard_iter_size());
+
+            let mut bound_sum = 0;
+            let mut waiting_sum = 0;
+            for r in &reader.readers {
+                let (bound, in_range) = memory::open_chunks_bound(&r.index, range);
+                let observed = observed_peak_open_chunks(r, range)?;
+                assert!(
+                    observed <= bound,
+                    "observed {} open chunks, bound {}",
+                    observed,
+                    bound
+                );
+                max_bound = max_bound.max(bound);
+                max_observed = max_observed.max(observed);
+                bound_sum += bound;
+                waiting_sum += in_range;
+            }
+            assert_eq!(est.max_open_chunks, bound_sum);
+            assert_eq!(est.waiting_chunks, waiting_sum);
+        }
+        Ok((max_bound, max_observed))
+    }
+
+    #[test]
+    fn test_make_chunks_covers_block_starting_before_range() -> Result<(), Error> {
+        let t1 = |a| T1 {
+            a,
+            b: 0,
+            c: 0,
+            d: 0,
+        };
+        // Two blocks of 2 items: [3, 19] and [42, 88].
+        let items = [3, 19, 42, 88].map(t1);
+        let tmp = tempfile::NamedTempFile::new()?;
+        write_t1_file(tmp.path(), &items, 2, 4)?;
+        let reader = ShardReader::<T1>::open(tmp.path())?;
+        let read = |range: &Range<T1>| -> Result<Vec<u64>, Error> {
+            let mut out = Vec::new();
+            for chunk in reader.make_chunks(4, range) {
+                for item in reader.iter_range(&chunk)? {
+                    out.push(item?.a);
+                }
+            }
+            Ok(out)
+        };
+
+        // Fewer start keys in range than requested chunks.
+        assert_eq!(read(&Range::new(t1(10), t1(100)))?, vec![19, 42, 88]);
+        // No start key in range, but the first block extends into it.
+        assert_eq!(read(&Range::new(t1(10), t1(15)))?, Vec::<u64>::new());
+        assert_eq!(read(&Range::new(t1(10), t1(20)))?, vec![19]);
+        // No block intersects the range.
+        assert!(reader
+            .make_chunks(4, &Range::new(t1(20), t1(40)))
+            .is_empty());
+        // Unbounded ranges are unchanged apart from the first start becoming `None`.
+        assert_eq!(read(&Range::all())?, vec![3, 19, 42, 88]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_corrupt_index_count_is_an_error() -> Result<(), Error> {
+        use byteorder::{ByteOrder, LittleEndian};
+
+        let mut g = Gen::new(10);
+        let tmp = tempfile::NamedTempFile::new()?;
+        write_t1_file(tmp.path(), &rand_items(100, &mut g), 10, 20)?;
+
+        // Footer: 4-byte magic, 4 reserved bytes, then the index position as a big-endian u64.
+        let bytes = std::fs::read(tmp.path())?;
+        let footer = &bytes[bytes.len() - 24..];
+        let mut pos = BigEndian::read_u64(&footer[8..16]) as usize;
+        // The index starts with two bincode strings (u64 length + bytes), then the record count.
+        for _ in 0..2 {
+            pos += 8 + LittleEndian::read_u64(&bytes[pos..pos + 8]) as usize;
+        }
+        assert_eq!(&bytes[pos..pos + 8], &10u64.to_le_bytes());
+
+        for count in [11, 1 << 40, u64::MAX] {
+            let mut corrupt = bytes.clone();
+            corrupt[pos..pos + 8].copy_from_slice(&u64::to_le_bytes(count));
+            std::fs::write(tmp.path(), &corrupt)?;
+            assert!(ShardReader::<T1>::open(tmp.path()).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_index_has_no_spare_capacity() -> Result<(), Error> {
+        let mut g = Gen::new(10);
+        let tmp = tempfile::NamedTempFile::new()?;
+        write_t1_file(tmp.path(), &rand_items(1 << 15, &mut g), 1, 1 << 10)?;
+        let reader = ShardReader::<T1>::open(tmp.path())?;
+        let index = &reader.readers[0].index;
+        assert_eq!(index.len(), 1 << 15);
+        assert_eq!(index.capacity(), index.len());
+        Ok(())
+    }
+
+    #[test]
+    fn test_memory_estimate_random_keys() -> Result<(), Error> {
+        // 2^14 items with item_buffer_size 2^10 gives about 32 runs that all span the key space.
+        let mut g = Gen::new(10);
+        let tmp = tempfile::NamedTempFile::new()?;
+        write_t1_file(tmp.path(), &rand_items(1 << 14, &mut g), 64, 1 << 10)?;
+
+        for num_chunks in [1, 4, 16] {
+            let (bound, observed) = check_memory_estimate(&[tmp.path()], num_chunks)?;
+            assert!(observed > 1);
+            assert!(
+                bound <= 40,
+                "bound {} should be close to the run count",
+                bound
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_memory_estimate_sorted_keys() -> Result<(), Error> {
+        let mut g = Gen::new(10);
+        let mut items = rand_items(1 << 14, &mut g);
+        items.sort();
+        let tmp = tempfile::NamedTempFile::new()?;
+        write_t1_file(tmp.path(), &items, 64, 1 << 10)?;
+
+        for num_chunks in [1, 4, 16] {
+            let (bound, _) = check_memory_estimate(&[tmp.path()], num_chunks)?;
+            assert!(
+                bound <= 2,
+                "sorted input should open few chunks, bound {}",
+                bound
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_memory_estimate_one_key() -> Result<(), Error> {
+        let mut g = Gen::new(10);
+        let items = repeat_n(rand_items(1, &mut g)[0], 1 << 14).collect::<Vec<_>>();
+        let tmp = tempfile::NamedTempFile::new()?;
+        write_t1_file(tmp.path(), &items, 64, 1 << 10)?;
+
+        let (bound, observed) = check_memory_estimate(&[tmp.path()], 4)?;
+        assert_eq!((bound, observed), (1, 1));
+        Ok(())
+    }
+
+    #[test]
+    fn test_memory_estimate_multiple_files() -> Result<(), Error> {
+        let mut g = Gen::new(10);
+        let files = (0..3)
+            .map(|_| tempfile::NamedTempFile::new())
+            .collect::<Result<Vec<_>, _>>()?;
+        for f in &files {
+            write_t1_file(f.path(), &rand_items(1 << 12, &mut g), 32, 1 << 9)?;
+        }
+        let paths: Vec<&Path> = files.iter().map(tempfile::NamedTempFile::path).collect();
+
+        for num_chunks in [1, 3, 10] {
+            check_memory_estimate(&paths, num_chunks)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_memory_estimate_sums_over_files() -> Result<(), Error> {
+        let mut g = Gen::new(10);
+        let files = (0..3)
+            .map(|_| tempfile::NamedTempFile::new())
+            .collect::<Result<Vec<_>, _>>()?;
+        for f in &files {
+            write_t1_file(f.path(), &rand_items(1 << 12, &mut g), 32, 1 << 9)?;
+        }
+        let paths: Vec<&Path> = files.iter().map(tempfile::NamedTempFile::path).collect();
+        let set_reader = ShardReader::<T1>::open_set(&paths)?;
+
+        for range in set_reader.make_chunks(5, &Range::all()) {
+            let per_file: usize = paths
+                .iter()
+                .map(|p| {
+                    let reader = ShardReader::<T1>::open(p)?;
+                    Ok(reader.memory_estimate(&range).total_bytes(32, 32))
+                })
+                .sum::<Result<usize, Error>>()?;
+            // Each per-file total also counts the one in-flight item and key.
+            let extra_in_flight = (paths.len() - 1) * (32 + 32);
+            assert_eq!(
+                set_reader.memory_estimate(&range).total_bytes(32, 32) + extra_in_flight,
+                per_file
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_memory_estimate_bound_holds_across_configs() -> Result<(), Error> {
+        // Small chunks and buffers with many duplicate keys, to exercise ties at chunk boundaries.
+        let mut g = Gen::new(4);
+        for (n_items, disk_chunk_size, item_buffer_size) in [
+            (500, 1, 16),
+            (500, 2, 8),
+            (2000, 3, 64),
+            (2000, 7, 40),
+            (5000, 16, 256),
+        ] {
+            let tmp = tempfile::NamedTempFile::new()?;
+            write_t1_file(
+                tmp.path(),
+                &rand_items(n_items, &mut g),
+                disk_chunk_size,
+                item_buffer_size,
+            )?;
+            for num_chunks in [1, 2, 5, 50] {
+                let (bound, observed) = check_memory_estimate(&[tmp.path()], num_chunks)?;
+                println!(
+                    "items {} chunk {} buffer {} ranges {}: bound {} observed {}",
+                    n_items, disk_chunk_size, item_buffer_size, num_chunks, bound, observed
+                );
+            }
+        }
+        Ok(())
     }
 
     #[test]
