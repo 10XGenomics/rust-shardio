@@ -1,6 +1,6 @@
 [package]
 name = "shardio"
-version = "0.8.2"
+version = "0.8.3"
 authors = ["Patrick Marks <patrick@10xgenomics.com>", "Sreenath Krishnan <sreenath.krishnan@10xgenomics.com>", "Lance Hepler <lance.hepler@10xgenomics.com>"]
 edition = "2018"
 license = "MIT"
@@ -27,8 +27,8 @@ min-max-heap = "1.2.2"
 serde = { version = "1.0", features = ["derive"] }
 crossbeam-channel = ">=0.4, <=0.6"
 log = "^0.4"
-zstd = "0.13.3"
-zstd-sys = { version = "2", default-features = false, features = ["experimental"] }
+zstd = "0.14.3"
+zstd-sys = { version = "2.0", default-features = false, features = ["experimental"] }
 pariter = { version = "0.6", optional = true }
 
 [dev-dependencies]
